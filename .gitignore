@@ -1,0 +1,10 @@
+rules.ninja
+.ninja*
+tags
+CMakeCache.txt
+CMakeFiles
+build.ninja
+cmake_install.cmake
+vtoucan
+*.sw*
+*.sipr*
