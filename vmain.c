@@ -1040,7 +1040,7 @@ static int shader_src(const char* sourcefile, uint32_t **destbuf, size_t *size)
 {
   struct stat st;
   if(stat(sourcefile, &st)) {
-    fprintf(stderr, "failed to stat vertex shader sipr src");
+    fprintf(stderr, "failed to stat vertex shader sipr src\n");
     return 1;
   }
   *destbuf = malloc(st.st_size);
@@ -1057,11 +1057,11 @@ static int shader_src(const char* sourcefile, uint32_t **destbuf, size_t *size)
 static int load_shaders(struct resources *r)
 {
 
-  if(shader_src("shaders/vertex.vert.sipr", &r->vert_sipr, &r->vert_sipr_sz))
+  if(shader_src("vertex.vert.sipr", &r->vert_sipr, &r->vert_sipr_sz))
     return 1;
   printf("loaded vertex.vert.sipr (%lu)\n", r->vert_sipr_sz);
 
-  if(shader_src("shaders/fragment.frag.sipr", &r->frag_sipr, &r->frag_sipr_sz))
+  if(shader_src("fragment.frag.sipr", &r->frag_sipr, &r->frag_sipr_sz))
     return 1;
   printf("loaded fragment.frag.sipr (%lu)\n", r->frag_sipr_sz);
 
