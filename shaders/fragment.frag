@@ -1,10 +1,9 @@
-#version 330 core
+#version 450 core
 
-layout(location = 0) out vec3 color;
+layout(location = 0) out vec4 out_color;
 
 void main(){
 
-  // purple ftw
-	color = vec3(1,0,1);
+	out_color = vec4(0.7, 0.7, 0.7, 1.0);
 
 }
