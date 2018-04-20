@@ -6,6 +6,14 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
+#define UNUSED(x) (void)(x)
+
+#define VKFN(loader, name, instance) \
+  PFN_##name name = (PFN_##name) loader(instance, #name); \
+  if(!name) { \
+    fprintf(stderr, "failed to load " #name "\n"); \
+  }
+
 struct network_resources {
   VkBuffer node_buffer,
            link_buffer;
@@ -74,6 +82,9 @@ struct vulkanrt {
   VkExtent2D surface_area;
   VkClearValue clear;
 
+  float *world;
+  float x, y, zoom;
+
   /* glfw */
   GLFWwindow *win;
 
@@ -81,7 +92,6 @@ struct vulkanrt {
   struct network_resources bufs;
   uint32_t memory_type_index;
 };
-
 
 static inline struct vulkanrt new_vulkanrt() {
 
@@ -116,6 +126,9 @@ static inline struct vulkanrt new_vulkanrt() {
     .nviewports = 1,
     .nscissors = 1,
     .nimg = 0,
+    .x = 1.0,
+    .y = 1.0,
+    .zoom = 1.0,
     .graphicsq = VK_NULL_HANDLE,
     .presentq = VK_NULL_HANDLE,
     .swapchain = VK_NULL_HANDLE,
@@ -157,6 +170,7 @@ static inline struct vulkanrt new_vulkanrt() {
 }
 
 int init_glfw(struct vulkanrt*);
+void glfw_key_callback(GLFWwindow *w, int key, int scancode, int action, int mods);
 void glfw_error_callback(int error, const char* description);
 int init_vulkan(struct vulkanrt*);
 int configure_vulkan(struct vulkanrt*, const struct network*);
@@ -174,10 +188,7 @@ int create_framebuffers(struct vulkanrt*);
 int create_semaphores(struct vulkanrt*);
 int record_command_buffers(struct vulkanrt*, const struct network*);
 int get_queue_info(struct vulkanrt*);
+int world_matrix(struct vulkanrt*);
+void update_world(struct vulkanrt*);
 void draw(struct vulkanrt*);
 
-#define VKFN(loader, name, instance) \
-  PFN_##name name = (PFN_##name) loader(instance, #name); \
-  if(!name) { \
-    fprintf(stderr, "failed to load " #name "\n"); \
-  }

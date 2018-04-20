@@ -2,6 +2,7 @@
 #include "toucan.h"
 #include "spock.h"
 #include "nets.h"
+#include "graphics.h"
 
 static void die(struct vulkanrt *r, struct network *n);
 

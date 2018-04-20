@@ -5,6 +5,11 @@
 #include <sys/stat.h>
 
 #include "spock.h"
+#include "graphics.h"
+
+//so we can access from glfw callbacks
+struct vulkanrt *__r = NULL;
+const struct network *__net = NULL;
 
 int free_vulkanrt(struct vulkanrt *r)
 {
@@ -24,6 +29,7 @@ int free_vulkanrt(struct vulkanrt *r)
     vkDestroyBuffer(r->vkd, r->bufs.node_buffer, NULL);
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer, NULL);
   }
+  free(r->world);
 
   /* destroy the drawing surface */
   printf("destroying surface\n");
@@ -472,10 +478,14 @@ int init_vulkan(struct vulkanrt *r)
 
 int configure_vulkan(struct vulkanrt *r, const struct network *n)
 {
+  __net = n;
   if(get_queue_info(r))
     return 1;
 
   if(net_bufs(r, n)) 
+    return 1;
+
+  if(world_matrix(r))
     return 1;
 
   if(bind_bufs(r, n))
@@ -557,6 +567,61 @@ int net_bufs(struct vulkanrt *r, const struct network *net)
   return 0;
 }
 
+int world_matrix(struct vulkanrt *r)
+{
+  r->world = malloc(16*sizeof(float));
+  update_world(r);
+  return 0;
+}
+
+void update_world(struct vulkanrt *r)
+{
+  float w2 = r->surface_area.width/2,
+        h2 = r->surface_area.height/2;
+
+  float left   = (-w2)*r->zoom + r->x,
+        right  = ( w2)*r->zoom + r->x,
+        top    = (-h2)*r->zoom + r->y,
+        bottom = ( h2)*r->zoom + r->y;
+
+
+
+  printf("world update %f\n", left);
+  orthom(left, right, top, bottom, 0, 10, r->world);
+
+  VKFN(r->vkdl, vkCmdPushConstants, r->vkd);
+  if(!vkCmdPushConstants)
+    return;
+
+  if(r != NULL && r->vkb != NULL && __net != NULL) {
+    record_command_buffers(__r, __net);
+  }
+}
+
+static int alloc_mem(struct vulkanrt *r, uint32_t size, VkDeviceMemory *mem)
+{
+  VKFN(r->vkdl, vkAllocateMemory, r->vkd);
+  if(!vkAllocateMemory)
+    return 1;
+  
+  VkMemoryAllocateInfo mai  = {
+    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    .pNext = NULL,
+    .allocationSize = size,
+    .memoryTypeIndex = r->memory_type_index
+  };
+  int res = vkAllocateMemory(r->vkd, &mai, NULL, mem);
+  if(res !=  VK_SUCCESS) {
+    fprintf(stderr, "failed to allocate node buffer memory (%d)\n", res);
+    return 1;
+  }
+  if(r->bufs.node_mem == VK_NULL_HANDLE) {
+    fprintf(stderr, "node allocation resulted in null handle\n");
+    return 1;
+  }
+  return 0;
+}
+
 int bind_bufs(struct vulkanrt *r, const struct network *net)
 {
   /* query device memory type information */
@@ -614,54 +679,26 @@ int bind_bufs(struct vulkanrt *r, const struct network *net)
 
   VkMemoryRequirements nmem_req,
                        lmem_req;
+                       //wmem_req;
+
   vkGetBufferMemoryRequirements(r->vkd, r->bufs.node_buffer, &nmem_req);
   vkGetBufferMemoryRequirements(r->vkd, r->bufs.link_buffer, &lmem_req);
 
   printf("node memory %lu\n", nmem_req.size);
 
   /* allocate the memory */
-  VKFN(r->vkdl, vkAllocateMemory, r->vkd);
-  if(!vkAllocateMemory)
+  if(alloc_mem(r, nmem_req.size, &r->bufs.node_mem))
     return 1;
   
-  VkMemoryAllocateInfo nmem_alloc = {
-    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .pNext = NULL,
-    .allocationSize = nmem_req.size,
-    .memoryTypeIndex = r->memory_type_index
-  };
-  int res = vkAllocateMemory(r->vkd, &nmem_alloc, NULL, &r->bufs.node_mem);
-  if(res !=  VK_SUCCESS) {
-    fprintf(stderr, "failed to allocate node buffer memory (%d)\n", res);
+  if(alloc_mem(r, lmem_req.size, &r->bufs.link_mem))
     return 1;
-  }
-  if(r->bufs.node_mem == VK_NULL_HANDLE) {
-    fprintf(stderr, "node allocation resulted in null handle\n");
-    return 1;
-  }
-
-  VkMemoryAllocateInfo lmem_alloc = {
-    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .pNext = NULL,
-    .allocationSize = lmem_req.size,
-    .memoryTypeIndex = r->memory_type_index
-  };
-  res = vkAllocateMemory(r->vkd, &lmem_alloc, NULL, &r->bufs.link_mem);
-  if(res !=  VK_SUCCESS) {
-    fprintf(stderr, "failed to allocate link buffer memory (%d)\n", res);
-    return 1;
-  }
-  if(r->bufs.link_mem == VK_NULL_HANDLE) {
-    fprintf(stderr, "link allocation resulted in null handle\n");
-    return 1;
-  }
 
   /* bind the memory */
   VKFN(r->vkdl, vkBindBufferMemory, r->vkd);
   if(!vkBindBufferMemory)
     return 1;
 
-  res = vkBindBufferMemory(r->vkd, r->bufs.node_buffer, r->bufs.node_mem, 0);
+  int res = vkBindBufferMemory(r->vkd, r->bufs.node_buffer, r->bufs.node_mem, 0);
   if(res != VK_SUCCESS) {
     fprintf(stderr, "binding node memory failed (%d)\n", res);
     return 1;
@@ -673,11 +710,11 @@ int bind_bufs(struct vulkanrt *r, const struct network *net)
     return 1;
   }
 
+  /* map memory and copy data */
   VKFN(r->vkdl, vkMapMemory, r->vkd);
   if(!vkMapMemory)
     return 1;
 
-  /* map memory and copy vertex data */
   void *vm, *lm;
   res = vkMapMemory(r->vkd, r->bufs.node_mem, 0, nmem_req.size, 0, &vm);
   if(res != VK_SUCCESS) {
@@ -715,12 +752,11 @@ int bind_bufs(struct vulkanrt *r, const struct network *net)
       .memory = r->bufs.link_mem,
       .offset = 0,
       .size = VK_WHOLE_SIZE
-    },
+    }
   };
-  vkFlushMappedMemoryRanges(r->vkd, 2, mmr);
+  vkFlushMappedMemoryRanges(r->vkd, 3, mmr);
   vkUnmapMemory(r->vkd, r->bufs.node_mem);
   vkUnmapMemory(r->vkd, r->bufs.link_mem);
-
 
   return 0;
 }
@@ -978,14 +1014,20 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
 
   /* create the pipeline */
 
+  VkPushConstantRange pcr = {
+    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+    .offset = 0,
+    .size = MAT4_SIZE
+  };
+
   VkPipelineLayoutCreateInfo plci = {
     .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
     .setLayoutCount = 0,
     .pSetLayouts = NULL,
-    .pushConstantRangeCount = 0,
-    .pPushConstantRanges = NULL
+    .pushConstantRangeCount = 1,
+    .pPushConstantRanges = &pcr
   };
   VKFN(r->vkdl, vkCreatePipelineLayout, r->vkd);
   if(!vkCreatePipelineLayout)
@@ -1430,6 +1472,10 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
   if(!vkCmdBindIndexBuffer)
     return 1;
 
+  VKFN(r->vkdl, vkCmdPushConstants, r->vkd);
+  if(!vkCmdPushConstants)
+    return 1;
+
   for(uint32_t i=0; i<r->nimg; i++) {
     vkBeginCommandBuffer(r->vkb[i], &bi);
 
@@ -1446,6 +1492,9 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
       .pClearValues = &r->clear
     };
     vkCmdBeginRenderPass(r->vkb[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
+        VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, r->world);
 
     /* node rendering */
     vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->node_pipeline);
@@ -1568,6 +1617,7 @@ void draw(struct vulkanrt *r)
 
 int init_glfw(struct vulkanrt *r)
 {
+  __r = r;
   if(!glfwInit()) {
     fprintf(stderr, "glfw init failed\n");
   }
@@ -1609,6 +1659,7 @@ int init_glfw(struct vulkanrt *r)
 
   /* create vulkan surface attached to glfw window */
   glfwCreateWindowSurface(r->vki, r->win, NULL, &r->surface);
+  glfwSetKeyCallback(r->win, glfw_key_callback);
 
   return 0;
 }
@@ -1619,3 +1670,48 @@ void glfw_error_callback(int error, const char* description)
   fprintf(stderr, "gflw[e]: %s (%d)\n", description, error);
 }
 
+void glfw_key_callback(GLFWwindow *w, int key, int scancode, int action, int mods)
+{
+  UNUSED(w);
+  UNUSED(scancode);
+  UNUSED(action);
+  UNUSED(mods);
+
+  //left
+  if(key == GLFW_KEY_A) {
+    __r->x += 10;
+    printf("left %f\n", __r->x);
+    update_world(__r);
+  }
+  //down
+  if(key == GLFW_KEY_S) {
+    __r->y -= 10;
+    printf("down %f\n", __r->y);
+    update_world(__r);
+  }
+  //right
+  if(key == GLFW_KEY_D) {
+    __r->x -= 10;
+    printf("right %f\n", __r->x);
+    update_world(__r);
+  }
+  //up
+  if(key == GLFW_KEY_W) {
+    __r->y += 10;
+    printf("up %f\n", __r->y);
+    update_world(__r);
+  }
+  //in
+  if(key == GLFW_KEY_I) {
+    __r->zoom -= 0.1;
+    printf("up %f\n", __r->y);
+    update_world(__r);
+  }
+  //out
+  if(key == GLFW_KEY_O) {
+    __r->zoom += 0.1;
+    printf("up %f\n", __r->y);
+    update_world(__r);
+  }
+
+}
