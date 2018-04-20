@@ -84,6 +84,7 @@ struct vulkanrt {
 
   float *world;
   float x, y, zoom;
+  float pan_delta, zoom_delta;
 
   /* glfw */
   GLFWwindow *win;
@@ -129,6 +130,8 @@ static inline struct vulkanrt new_vulkanrt() {
     .x = 1.0,
     .y = 1.0,
     .zoom = 1.0,
+    .pan_delta = 5,
+    .zoom_delta = 0.03,
     .graphicsq = VK_NULL_HANDLE,
     .presentq = VK_NULL_HANDLE,
     .swapchain = VK_NULL_HANDLE,

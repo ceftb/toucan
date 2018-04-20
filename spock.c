@@ -584,9 +584,6 @@ void update_world(struct vulkanrt *r)
         top    = (-h2)*r->zoom + r->y,
         bottom = ( h2)*r->zoom + r->y;
 
-
-
-  printf("world update %f\n", left);
   orthom(left, right, top, bottom, 0, 10, r->world);
 
   VKFN(r->vkdl, vkCmdPushConstants, r->vkd);
@@ -1679,38 +1676,32 @@ void glfw_key_callback(GLFWwindow *w, int key, int scancode, int action, int mod
 
   //left
   if(key == GLFW_KEY_A) {
-    __r->x += 10;
-    printf("left %f\n", __r->x);
+    __r->x += __r->pan_delta;
     update_world(__r);
   }
   //down
   if(key == GLFW_KEY_S) {
-    __r->y -= 10;
-    printf("down %f\n", __r->y);
+    __r->y -= __r->pan_delta;
     update_world(__r);
   }
   //right
   if(key == GLFW_KEY_D) {
-    __r->x -= 10;
-    printf("right %f\n", __r->x);
+    __r->x -= __r->pan_delta;
     update_world(__r);
   }
   //up
   if(key == GLFW_KEY_W) {
-    __r->y += 10;
-    printf("up %f\n", __r->y);
+    __r->y += __r->pan_delta;
     update_world(__r);
   }
   //in
   if(key == GLFW_KEY_I) {
-    __r->zoom -= 0.1;
-    printf("up %f\n", __r->y);
+    __r->zoom -= __r->zoom_delta;
     update_world(__r);
   }
   //out
   if(key == GLFW_KEY_O) {
-    __r->zoom += 0.1;
-    printf("up %f\n", __r->y);
+    __r->zoom += __r->zoom_delta;
     update_world(__r);
   }
 
