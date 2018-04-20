@@ -1,307 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <dlfcn.h>
 #include <string.h>
 #include <sys/stat.h>
 
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
+#include "spock.h"
 
-//#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
-/* The number of vulkan extensions required */
-#define VK_EXTNS 4
-const char* vkx[VK_EXTNS] = {
-  "VK_KHR_surface",
-  "VK_KHR_xcb_surface",
-  "VK_KHR_xlib_surface",
-  "VK_KHR_wayland_surface",
-};
-
-VkApplicationInfo application_info = {
-  .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-  .pNext = NULL,
-  .pApplicationName = "toucan",
-  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-  .pEngineName = NULL,
-  .engineVersion = 0,
-  .apiVersion = VK_MAKE_VERSION(1, 0, 0)
-};
-
-VkInstanceCreateInfo instance_create_info = {
-  .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-  .pNext = NULL,
-  .flags = 0,
-  .pApplicationInfo = &application_info,
-  .enabledLayerCount = 0,
-  .ppEnabledLayerNames = NULL, 
-  .enabledExtensionCount = 4,
-  .ppEnabledExtensionNames = vkx
-};
-
-struct point2 {
-  float x, y;
-};
-
-struct network {
-  uint32_t n,  /* number of nodes */
-           l;  /* number of links */
-  struct point2 *nodes;
-  uint32_t *links;
-};
-
-struct network_resources {
-  VkBuffer node_buffer,
-           link_buffer;
-
-  VkDeviceMemory node_mem,
-                 link_mem;
-};
-
-struct image_resources {
-  VkImage handle;
-  VkImageView view;
-  VkSampler sampler;
-  VkDeviceMemory memory;
-};
-
-struct resources {
-  /* vulkan */
-  void *vk;
-  VkInstance vki;
-  VkPhysicalDevice vkpd;
-  VkDevice vkd;
-
-  uint32_t graphicsq_family_index, 
-           presentq_family_index,
-           graphicsq_index,
-           presentq_index;
-
-  VkQueue graphicsq,
-          presentq;
-
-  PFN_vkGetInstanceProcAddr vkl;
-  PFN_vkGetDeviceProcAddr vkdl;
-  VkSurfaceKHR surface;
-  VkCommandPool vkp;
-  //uint32_t vkb_size; tied to number of images (nimg)
-  VkCommandBuffer *vkb;
-  VkShaderModule vkvert, vkfrag;
-  size_t vert_sipr_sz, frag_sipr_sz;
-  uint32_t *vert_sipr, *frag_sipr;
-
-  uint32_t nvib;
-  VkVertexInputBindingDescription *vibs;
-  uint32_t nvattr;
-  VkVertexInputAttributeDescription *vattrs;
-
-  uint32_t nviewports;
-  VkViewport *viewports;
-  uint32_t nscissors;
-  VkRect2D *scissors;
-
-  VkSwapchainKHR swapchain, old_swapchain;
-  VkFormat format;
-  uint32_t nimg;
-  struct image_resources *images;
-  VkFramebuffer *framebuffers;
-  VkExtent2D extent;
-
-  VkRenderPass render_pass;
-
-  VkPipeline node_pipeline, link_pipeline;
-  VkPipelineLayout node_pipeline_layout, link_pipeline_layout;
-
-  VkSemaphore image_ready,
-              rendering_finished;
-
-  VkExtent2D surface_area;
-  VkClearValue clear;
-
-  /* glfw */
-  GLFWwindow *win;
-
-  /* data */
-  struct network data;
-  struct network_resources bufs;
-  uint32_t memory_type_index;
-
-};
-
-
-
-static int init_glfw(struct resources*);
-static void glfw_error_callback(int error, const char* description);
-static int init_vulkan(struct resources*);
-static int alloc_resources(struct resources*);
-static int free_resources(struct resources*);
-static struct network init_data();
-static int net_bufs(struct resources*, struct network);
-static int bind_bufs(struct resources*);
-static int create_command_pool(struct resources*);
-static int load_shaders(struct resources*);
-
-static int init_graphics_pipeline(struct resources*, VkPrimitiveTopology pt,
-    VkPipelineLayout *layout, VkPipeline *pipeline);
-
-static int create_swapchain(struct resources*);
-static int create_render_pass(struct resources*);
-static int create_framebuffers(struct resources*);
-static int create_semaphores(struct resources*);
-static int record_command_buffers(struct resources*);
-static int vk_get_queue_info(struct resources*);
-static void draw(struct resources*);
-
-static void die(struct resources *r) {
-  free_resources(r);
-  exit(1);
-}
-
-int main(void)
-{
-  // TODO just bzero the fucking thing and set what remains
-  struct resources r = {
-    /* vulkan */
-    .vk = NULL,
-    .vki = NULL,
-    .vkpd = NULL,
-    .vkd = NULL,
-    .vkl = NULL,
-    .vkp = NULL,
-    .vkb = NULL,
-    .vkvert = NULL,
-    .vkfrag = NULL,
-    .vert_sipr = NULL,
-    .frag_sipr = NULL,
-    .surface = NULL,
-    .vibs = NULL,
-    .vattrs = NULL,
-    .viewports = NULL,
-    .scissors = NULL,
-    .images = NULL,
-    .framebuffers = NULL,
-    .graphicsq_family_index = 0,
-    .presentq_family_index = 0,
-    .graphicsq_index = 0,
-    .presentq_index = 0,
-    .vert_sipr_sz = 0,
-    .frag_sipr_sz = 0,
-    .nvib = 0,
-    .nvattr = 0,
-    .nviewports = 1,
-    .nscissors = 1,
-    .nimg = 0,
-    .graphicsq = VK_NULL_HANDLE,
-    .presentq = VK_NULL_HANDLE,
-    .swapchain = VK_NULL_HANDLE,
-    .old_swapchain = VK_NULL_HANDLE,
-    .render_pass = VK_NULL_HANDLE,
-    .node_pipeline = VK_NULL_HANDLE,
-    .node_pipeline_layout = VK_NULL_HANDLE,
-    .link_pipeline = VK_NULL_HANDLE,
-    .link_pipeline_layout = VK_NULL_HANDLE,
-    .image_ready = VK_NULL_HANDLE,
-    .rendering_finished = VK_NULL_HANDLE,
-
-    /* glfw */
-    .win = 0,
-
-    .surface_area = {
-      .width = 1000,
-      .height = 700
-    },
-
-    .bufs = {
-      .node_buffer = NULL,
-      .link_buffer = NULL,
-      .node_mem = VK_NULL_HANDLE,
-      .link_mem = VK_NULL_HANDLE
-    },
-
-    .extent = {
-      .width = 0,
-      .height = 0,
-    },
-
-    .clear = {
-      .color.float32 = {0.01f, 0.01f, 0.01f}
-    }
-  };
-
-  if(alloc_resources(&r))
-    die(&r);
-
-  r.data = init_data();
-
-  if(vk_get_queue_info(&r))
-    die(&r);
-
-  if(net_bufs(&r, r.data)) 
-    die(&r);
-
-  if(bind_bufs(&r))
-    die(&r);
-
-  if(load_shaders(&r))
-    die(&r);
-
-  if(create_swapchain(&r))
-    die(&r);
-
-  if(create_render_pass(&r))
-    die(&r);
-
-  if(create_framebuffers(&r))
-    die(&r);
-
-  if(init_graphics_pipeline(&r, VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 
-        &r.node_pipeline_layout, &r.node_pipeline))
-    die(&r);
-
-  if(init_graphics_pipeline(&r, VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
-        &r.link_pipeline_layout, &r.link_pipeline))
-    die(&r);
-
-  if(create_semaphores(&r))
-    die(&r);
-
-  if(create_command_pool(&r))
-    die(&r);
-
-  if(record_command_buffers(&r))
-    die(&r);
-
-  while(!glfwWindowShouldClose(r.win)) {
-    // the toucan is flying
-    glfwPollEvents();
-    draw(&r);
-  }
-
-  free_resources(&r);
-}
-
-static int alloc_resources(struct resources *r)
-{
-  int err = init_vulkan(r);
-  if(err) {
-    return err;
-  }
-  err = init_glfw(r);
-  if(err) {
-    return err;
-  }
-  return err;
-}
-
-#define VKFN(loader, name, instance) \
-  PFN_##name name = (PFN_##name) loader(instance, #name); \
-  if(!name) { \
-    fprintf(stderr, "failed to load " #name "\n"); \
-  }
-
-static int free_resources(struct resources *r)
+int free_vulkanrt(struct vulkanrt *r)
 {
   int ret = 0;
   int err;
@@ -319,11 +24,6 @@ static int free_resources(struct resources *r)
     vkDestroyBuffer(r->vkd, r->bufs.node_buffer, NULL);
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer, NULL);
   }
-
-  free(r->data.nodes);
-  r->data.nodes = NULL;
-  free(r->data.links);
-  r->data.links = NULL;
 
   /* destroy the drawing surface */
   printf("destroying surface\n");
@@ -451,7 +151,7 @@ static int free_resources(struct resources *r)
   return ret;
 }
 
-static int vk_create_instance(struct resources *r)
+int create_instance(struct vulkanrt *r)
 {
   VKFN(r->vkl, vkEnumerateInstanceExtensionProperties, NULL);
   if(!vkEnumerateInstanceExtensionProperties)
@@ -481,6 +181,35 @@ static int vk_create_instance(struct resources *r)
   if(!vkCreateInstance)
     return 1;
 
+  #define NUM_VK_EXT 4
+  const char* vkx[NUM_VK_EXT] = {
+    "VK_KHR_surface",
+    "VK_KHR_xcb_surface",
+    "VK_KHR_xlib_surface",
+    "VK_KHR_wayland_surface",
+  };
+
+  VkApplicationInfo application_info = {
+    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+    .pNext = NULL,
+    .pApplicationName = "toucan",
+    .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+    .pEngineName = NULL,
+    .engineVersion = 0,
+    .apiVersion = VK_MAKE_VERSION(1, 0, 0)
+  };
+
+  VkInstanceCreateInfo instance_create_info = {
+    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .pApplicationInfo = &application_info,
+    .enabledLayerCount = 0,
+    .ppEnabledLayerNames = NULL, 
+    .enabledExtensionCount = NUM_VK_EXT,
+    .ppEnabledExtensionNames = vkx
+  };
+
   if(vkCreateInstance(&instance_create_info, NULL, &r->vki) != VK_SUCCESS) {
     fprintf(stderr, "failed to create vulkan instance\n");
     return 1;
@@ -489,7 +218,7 @@ static int vk_create_instance(struct resources *r)
   return 0;
 }
 
-static int vk_select_device(struct resources *r)
+int select_device(struct vulkanrt *r)
 {
   VKFN(r->vkl, vkEnumeratePhysicalDevices, r->vki);
   if(!vkEnumeratePhysicalDevices)
@@ -527,14 +256,16 @@ static int vk_select_device(struct resources *r)
     vkGetPhysicalDeviceProperties(devices[i], &props);
     printf("  name: %s (%x)\n", props.deviceName, props.deviceID);
     uint32_t n_ext;
-    if(vkEnumerateDeviceExtensionProperties(devices[i], NULL, &n_ext, NULL) != VK_SUCCESS)
+    if(vkEnumerateDeviceExtensionProperties(
+          devices[i], NULL, &n_ext, NULL) != VK_SUCCESS)
     {
       fprintf(stderr, "failed to query properties for vulkan device %u\n", i);
       ret = 1;
     }
     else {
       VkExtensionProperties *xps = malloc(n_ext*sizeof(VkExtensionProperties));
-      if(vkEnumerateDeviceExtensionProperties(devices[i], NULL, &n_ext, xps) != VK_SUCCESS)
+      if(vkEnumerateDeviceExtensionProperties(
+            devices[i], NULL, &n_ext, xps) != VK_SUCCESS)
       {
         fprintf(stderr, "failed to load properties for vulkan device %u\n", i);
         ret = 1;
@@ -572,7 +303,7 @@ static int vk_select_device(struct resources *r)
   return ret;
 }
 
-static int vk_get_queue_info(struct resources *r)
+int get_queue_info(struct vulkanrt *r)
 {
   VKFN(r->vkl, vkGetPhysicalDeviceQueueFamilyProperties, r->vki);
   if(!vkGetPhysicalDeviceQueueFamilyProperties)
@@ -633,7 +364,7 @@ static int vk_get_queue_info(struct resources *r)
   return 0;
 }
 
-static int vk_create_device(struct resources *r) {
+int create_device(struct vulkanrt *r) {
 
   /* set the device properties
    * notes:
@@ -700,7 +431,7 @@ static int vk_create_device(struct resources *r) {
 
 }
 
-static int init_vulkan(struct resources *r)
+int init_vulkan(struct vulkanrt *r)
 {
   r->vk = dlopen("libvulkan.so.1", RTLD_NOW);
   if(!r->vk){
@@ -721,18 +452,17 @@ static int init_vulkan(struct resources *r)
     return 1;
   }
 
-  int err = vk_create_instance(r);
+  int err = create_instance(r);
   if(err) {
     return 1;
   }
 
-  err = vk_select_device(r);
+  err = select_device(r);
   if(err) {
     return 1;
   }
 
-
-  err = vk_create_device(r);
+  err = create_device(r);
   if(err) {
     return 1;
   }
@@ -740,53 +470,57 @@ static int init_vulkan(struct resources *r)
   return err;
 }
 
-/* A set of coordintes that describes the following network
- *
- *  1.          .5
- *    `.      .'
- *      2----3     
- *    .'      '.
- *  0'          `4
- *
- */
-static struct network init_data()
+int configure_vulkan(struct vulkanrt *r, const struct network *n)
 {
-  struct network net = {
-    .n = 6,
-    .l = 5,
-    .nodes = malloc(net.n*sizeof(struct point2)),
-    .links = malloc(net.l*2*sizeof(uint32_t))
-  };
+  if(get_queue_info(r))
+    return 1;
 
-  struct point2 nodes[] = {
-    {-0.8,  0.8},
-    {-0.8, -0.8},
-    {-0.4,  0.0},
-    { 0.4,  0.0},
-    { 0.8,  0.8},
-    { 0.8, -0.8}
-  };
-  memcpy(net.nodes, nodes, net.n*sizeof(struct point2));
+  if(net_bufs(r, n)) 
+    return 1;
 
-  uint32_t links[] = {
-    0, 2,
-    1, 2,
-    2, 3,
-    3, 4,
-    3, 5
-  };
-  memcpy(net.links, links, net.l*2*sizeof(uint32_t));
+  if(bind_bufs(r, n))
+    return 1;
 
-  return net;
+  if(load_shaders(r))
+    return 1;
+
+  if(create_swapchain(r))
+    return 1;
+
+  if(create_render_pass(r))
+    return 1;
+
+  if(create_framebuffers(r))
+    return 1;
+
+  if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 
+        &r->node_pipeline_layout, &r->node_pipeline))
+    return 1;
+
+  if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+        &r->link_pipeline_layout, &r->link_pipeline))
+    return 1;
+
+  if(create_semaphores(r))
+    return 1;
+
+  if(create_command_pool(r))
+    return 1;
+
+  if(record_command_buffers(r, n))
+    return 1;
+
+  return 0;
+
 }
 
-static int net_bufs(struct resources *r, struct network net)
+int net_bufs(struct vulkanrt *r, const struct network *net)
 {
   VkBufferCreateInfo nbi = {
     .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
-    .size = net.n*sizeof(struct point2),
+    .size = net->n*sizeof(struct point2),
     .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
     .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     .queueFamilyIndexCount = 0,
@@ -797,7 +531,7 @@ static int net_bufs(struct resources *r, struct network net)
     .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
-    .size = net.l*2*sizeof(uint32_t),
+    .size = net->l*2*sizeof(uint32_t),
     .usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
     .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     .queueFamilyIndexCount = 0,
@@ -823,7 +557,7 @@ static int net_bufs(struct resources *r, struct network net)
   return 0;
 }
 
-static int bind_bufs(struct resources *r)
+int bind_bufs(struct vulkanrt *r, const struct network *net)
 {
   /* query device memory type information */
   VKFN(r->vkl, vkGetPhysicalDeviceMemoryProperties, r->vki);
@@ -950,14 +684,14 @@ static int bind_bufs(struct resources *r)
     fprintf(stderr, "failed to map node memory for copying (%d)\n", res);
     return 1;
   }
-  memcpy(vm, r->data.nodes, nmem_req.size);
+  memcpy(vm, net->nodes, nmem_req.size);
 
   res = vkMapMemory(r->vkd, r->bufs.link_mem, 0, lmem_req.size, 0, &lm);
   if(res != VK_SUCCESS) {
     fprintf(stderr, "failed to map link memory for copying (%d)\n", res);
     return 1;
   }
-  memcpy(lm, r->data.links, lmem_req.size);
+  memcpy(lm, net->links, lmem_req.size);
 
   /* unmap memory */
   VKFN(r->vkdl, vkFlushMappedMemoryRanges, r->vkd);
@@ -991,7 +725,7 @@ static int bind_bufs(struct resources *r)
   return 0;
 }
 
-static int create_command_pool(struct resources *r)
+int create_command_pool(struct vulkanrt *r)
 {
   /* create the pool */
   VkCommandPoolCreateInfo vkpi = {
@@ -1036,7 +770,7 @@ static int create_command_pool(struct resources *r)
   return 0;
 }
 
-static int shader_src(const char* sourcefile, uint32_t **destbuf, size_t *size)
+int shader_src(const char* sourcefile, uint32_t **destbuf, size_t *size)
 {
   struct stat st;
   if(stat(sourcefile, &st)) {
@@ -1054,7 +788,7 @@ static int shader_src(const char* sourcefile, uint32_t **destbuf, size_t *size)
   return 0;
 }
 
-static int load_shaders(struct resources *r)
+int load_shaders(struct vulkanrt *r)
 {
 
   if(shader_src("vertex.vert.sipr", &r->vert_sipr, &r->vert_sipr_sz))
@@ -1100,7 +834,7 @@ static int load_shaders(struct resources *r)
   return 0;
 }
 
-static int init_graphics_pipeline(struct resources *r, VkPrimitiveTopology pt,
+int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
     VkPipelineLayout *layout, VkPipeline *pipeline)
 {
   /* create the pipeline parameters */
@@ -1304,7 +1038,7 @@ static int init_graphics_pipeline(struct resources *r, VkPrimitiveTopology pt,
   return 0;
 }
 
-static uint32_t decide_num_img(VkSurfaceCapabilitiesKHR *sc)
+uint32_t decide_num_img(VkSurfaceCapabilitiesKHR *sc)
 {
   uint32_t ret;
   /* maxImageCount = 0 indicates no limit on # of images according to vulkan 
@@ -1318,7 +1052,7 @@ static uint32_t decide_num_img(VkSurfaceCapabilitiesKHR *sc)
   return ret;
 }
 
-static VkSurfaceFormatKHR decide_format(VkSurfaceFormatKHR *formats, uint32_t count)
+VkSurfaceFormatKHR decide_format(VkSurfaceFormatKHR *formats, uint32_t count)
 {
   printf("supported image formats:\n");
   for(uint32_t i=0; i<count; i++)
@@ -1338,7 +1072,7 @@ static VkSurfaceFormatKHR decide_format(VkSurfaceFormatKHR *formats, uint32_t co
   return formats[0];
 }
 
-static VkPresentModeKHR decide_present_mode(VkPresentModeKHR *modes, uint32_t count)
+VkPresentModeKHR decide_present_mode(VkPresentModeKHR *modes, uint32_t count)
 {
   VkBool32 immediate = VK_FALSE;
 
@@ -1356,7 +1090,7 @@ static VkPresentModeKHR decide_present_mode(VkPresentModeKHR *modes, uint32_t co
   return  VK_PRESENT_MODE_FIFO_KHR;
 }
 
-static int create_swapchain(struct resources *r)
+int create_swapchain(struct vulkanrt *r)
 {
   /* query surface capabilities */
   VKFN(r->vkl, vkGetPhysicalDeviceSurfaceCapabilitiesKHR, r->vki);
@@ -1531,7 +1265,7 @@ static int create_swapchain(struct resources *r)
   return 0;
 }
 
-static int create_render_pass(struct resources *r)
+int create_render_pass(struct vulkanrt *r)
 {
   VkAttachmentDescription ad[] = {
     {
@@ -1593,7 +1327,7 @@ static int create_render_pass(struct resources *r)
   return 0;
 }
 
-static int create_framebuffers(struct resources *r)
+int create_framebuffers(struct vulkanrt *r)
 {
   VKFN(r->vkdl, vkCreateFramebuffer, r->vkd);
   if(!vkCreateFramebuffer)
@@ -1625,7 +1359,7 @@ static int create_framebuffers(struct resources *r)
   return 0;
 }
 
-static int create_semaphores(struct resources *r)
+int create_semaphores(struct vulkanrt *r)
 {
   VKFN(r->vkdl, vkCreateSemaphore, r->vkd);
   if(!vkCreateSemaphore)
@@ -1651,7 +1385,7 @@ static int create_semaphores(struct resources *r)
   return 0;
 }
 
-static int record_command_buffers(struct resources *r)
+int record_command_buffers(struct vulkanrt *r, const struct network *net)
 {
   VkCommandBufferBeginInfo bi = {
     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1718,8 +1452,8 @@ static int record_command_buffers(struct resources *r)
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
     vkCmdDraw(r->vkb[i],
-        r->data.n, /* vertex count */
-        r->data.n, /* instance count */
+        net->n, /* vertex count */
+        net->n, /* instance count */
         0,         /* first vertex */
         0          /* first instance */
     );
@@ -1728,8 +1462,8 @@ static int record_command_buffers(struct resources *r)
     vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
     vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(r->vkb[i], 
-        r->data.l*2, /* vertex count (nodes) (2 per line) */
-        r->data.l, /* instance count (lines) */
+        net->l*2, /* vertex count (nodes) (2 per line) */
+        net->l, /* instance count (lines) */
         0,         /* first index */
         0,         /* vertex offset */
         0          /* first instance */
@@ -1747,7 +1481,7 @@ static int record_command_buffers(struct resources *r)
   return 0;
 }
 
-static void draw(struct resources *r)
+void draw(struct vulkanrt *r)
 {
   /* get a handle for the next image to present */
   VKFN(r->vkdl, vkAcquireNextImageKHR, r->vkd);
@@ -1830,10 +1564,9 @@ static void draw(struct resources *r)
       return;
   }
 
-
 }
 
-static int init_glfw(struct resources *r)
+int init_glfw(struct vulkanrt *r)
 {
   if(!glfwInit()) {
     fprintf(stderr, "glfw init failed\n");
@@ -1881,7 +1614,8 @@ static int init_glfw(struct resources *r)
 }
 
 
-static void glfw_error_callback(int error, const char* description)
+void glfw_error_callback(int error, const char* description)
 {
   fprintf(stderr, "gflw[e]: %s (%d)\n", description, error);
 }
+
