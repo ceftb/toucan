@@ -31,6 +31,15 @@ int free_vulkanrt(struct vulkanrt *r)
   }
   free(r->world);
 
+  /* destroy swapchain */
+  printf("destroying swapchain\n");
+  VKFN(r->vkdl, vkDestroySwapchainKHR, r->vkd);
+  if(vkDestroySwapchainKHR) {
+    vkDestroySwapchainKHR(r->vkd, r->swapchain, NULL);
+    if(r->old_swapchain != VK_NULL_HANDLE)
+      vkDestroySwapchainKHR(r->vkd, r->old_swapchain, NULL);
+  }
+
   /* destroy the drawing surface */
   printf("destroying surface\n");
   VKFN(r->vkl, vkDestroySurfaceKHR, r->vki);
@@ -43,15 +52,6 @@ int free_vulkanrt(struct vulkanrt *r)
 
   printf("shutting down glfw\n");
   glfwTerminate();
-
-  /* destroy swapchain */
-  printf("destroying swapchain\n");
-  VKFN(r->vkdl, vkDestroySwapchainKHR, r->vkd);
-  if(vkDestroySwapchainKHR) {
-    vkDestroySwapchainKHR(r->vkd, r->swapchain, NULL);
-    if(r->old_swapchain != VK_NULL_HANDLE)
-      vkDestroySwapchainKHR(r->vkd, r->old_swapchain, NULL);
-  }
 
   /* destroy views images */
   printf("destroying image views\n");
@@ -104,6 +104,13 @@ int free_vulkanrt(struct vulkanrt *r)
     vkDestroySemaphore(r->vkd, r->rendering_finished, NULL);
   }
 
+  /* destroy fences */
+  printf("destroying fences\n");
+  VKFN(r->vkdl, vkDestroyFence, r->vkd);
+  if(vkDestroyFence) {
+    vkDestroyFence(r->vkd, r->render_fence, NULL);
+  }
+
   /* destroy the command buffer */
   printf("destroying command buffer\n");
   VKFN(r->vkdl, vkFreeCommandBuffers, r->vkd);
@@ -130,19 +137,20 @@ int free_vulkanrt(struct vulkanrt *r)
   free(r->frag_sipr);
   r->frag_sipr = NULL;
 
+  /* free the queues */
+  free(r->qps);
+
   /* destroy the vulkan device */
   printf("destroying vulkan device\n");
   VKFN(r->vkl, vkDestroyDevice, r->vki);
   if(vkDestroyDevice)
     vkDestroyDevice(r->vkd, NULL);
 
-
   /* destroy the vulkan instance */
   printf("destroying the vulkan instance\n");
   VKFN(r->vkl, vkDestroyInstance, r->vki);
   if(vkDestroyInstance)
     vkDestroyInstance(r->vki, NULL);
-
 
   /* close the vulkan library */
   printf("closing vulkan library\n");
@@ -183,6 +191,21 @@ int create_instance(struct vulkanrt *r)
   }
   free(vxt);
 
+  VKFN(r->vkl, vkEnumerateInstanceLayerProperties, NULL);
+  if(!vkEnumerateInstanceExtensionProperties)
+    return 1;
+
+  vkEnumerateInstanceLayerProperties(&n, NULL);
+  VkLayerProperties *lps = malloc(n*sizeof(VkLayerProperties));
+  vkEnumerateInstanceLayerProperties(&n, lps);
+
+  printf("layers:\n");
+  for(uint32_t i=0; i<n; i++)
+  {
+    printf("  %s\n", lps[i].layerName);
+  }
+  free(lps);
+
   VKFN(r->vkl, vkCreateInstance, NULL);
   if(!vkCreateInstance)
     return 1;
@@ -205,13 +228,18 @@ int create_instance(struct vulkanrt *r)
     .apiVersion = VK_MAKE_VERSION(1, 0, 0)
   };
 
+  #define NUM_LAYERS 1
+  const char* layers[NUM_LAYERS] = {
+    "VK_LAYER_LUNARG_standard_validation",
+  };
+
   VkInstanceCreateInfo instance_create_info = {
     .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
     .pApplicationInfo = &application_info,
-    .enabledLayerCount = 0,
-    .ppEnabledLayerNames = NULL, 
+    .enabledLayerCount = NUM_LAYERS,
+    .ppEnabledLayerNames = layers, 
     .enabledExtensionCount = NUM_VK_EXT,
     .ppEnabledExtensionNames = vkx
   };
@@ -315,17 +343,21 @@ int get_queue_info(struct vulkanrt *r)
   if(!vkGetPhysicalDeviceQueueFamilyProperties)
     return 1;
 
+  /* get the physical device queue family properties */
+  vkGetPhysicalDeviceQueueFamilyProperties(r->vkpd, &r->nqps, NULL);
+  r->qps = malloc(r->nqps*sizeof(VkQueueFamilyProperties));
+  vkGetPhysicalDeviceQueueFamilyProperties(r->vkpd, &r->nqps, r->qps);
+
+  return 0;
+}
+
+int init_khr(struct vulkanrt *r) {
+
   VKFN(r->vkl, vkGetPhysicalDeviceSurfaceSupportKHR, r->vki);
   if(!vkGetPhysicalDeviceSurfaceSupportKHR)
     return 1;
 
-  /* get the physical device queue family properties */
-  uint32_t n;
-  vkGetPhysicalDeviceQueueFamilyProperties(r->vkpd, &n, NULL);
-  VkQueueFamilyProperties *qps = malloc(n*sizeof(VkQueueFamilyProperties));
-  vkGetPhysicalDeviceQueueFamilyProperties(r->vkpd, &n, qps);
-
-  for(uint32_t i=0; i<n; i++){
+  for(uint32_t i=0; i<r->nqps; i++){
 
     VkBool32 present_support;
     vkGetPhysicalDeviceSurfaceSupportKHR(r->vkpd, i, r->surface, 
@@ -333,23 +365,23 @@ int get_queue_info(struct vulkanrt *r)
 
     printf("queue-%u:\n", i);
     printf("  type:");
-    if(qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+    if(r->qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
       printf(" graphics");
     }
-    if(qps[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+    if(r->qps[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
       printf(" compute");
     }
-    if(qps[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
+    if(r->qps[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
       printf(" transfer");
     }
-    if(qps[i].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) {
+    if(r->qps[i].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) {
       printf(" sparse");
     }
     printf("\n");
-    printf("  count: %u\n", qps[i].queueCount);
+    printf("  count: %u\n", r->qps[i].queueCount);
 
     /* XXX only support combined graphics/present queues for now */
-    if(qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
+    if(r->qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
         present_support == VK_TRUE) {
       /* mark the queue family as selected */
       r->graphicsq_family_index = i;
@@ -363,14 +395,14 @@ int get_queue_info(struct vulkanrt *r)
         r->graphicsq_index);
   }
 
-  free(qps);
-
   printf("selected queue-%u\n", r->graphicsq_family_index);
 
   return 0;
+
 }
 
 int create_device(struct vulkanrt *r) {
+
 
   /* set the device properties
    * notes:
@@ -397,6 +429,11 @@ int create_device(struct vulkanrt *r) {
     "VK_KHR_swapchain"
   };
 
+  VkPhysicalDeviceFeatures pdf = {
+    .largePoints = VK_TRUE,
+    .wideLines = VK_TRUE
+  };
+
   VkDeviceCreateInfo vci = {
     .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
     .pNext = NULL,
@@ -407,7 +444,7 @@ int create_device(struct vulkanrt *r) {
     .ppEnabledLayerNames = NULL,
     .enabledExtensionCount = 1,
     .ppEnabledExtensionNames = exts,
-    .pEnabledFeatures = NULL
+    .pEnabledFeatures = &pdf
   };
 
   /* create the device */
@@ -468,10 +505,8 @@ int init_vulkan(struct vulkanrt *r)
     return 1;
   }
 
-  err = create_device(r);
-  if(err) {
+  if(get_queue_info(r))
     return 1;
-  }
 
   return err;
 }
@@ -479,8 +514,14 @@ int init_vulkan(struct vulkanrt *r)
 int configure_vulkan(struct vulkanrt *r, const struct network *n)
 {
   __net = n;
-  if(get_queue_info(r))
+
+  if(init_khr(r)) {
     return 1;
+  }
+
+  if(create_device(r)) {
+    return 1;
+  }
 
   if(net_bufs(r, n)) 
     return 1;
@@ -512,6 +553,9 @@ int configure_vulkan(struct vulkanrt *r, const struct network *n)
     return 1;
 
   if(create_semaphores(r))
+    return 1;
+  
+  if(create_fences(r))
     return 1;
 
   if(create_command_pool(r))
@@ -590,7 +634,16 @@ void update_world(struct vulkanrt *r)
   if(!vkCmdPushConstants)
     return;
 
+  VKFN(r->vkdl, vkWaitForFences, r->vkd);
+  if(!vkWaitForFences)
+    return;
+
   if(r != NULL && r->vkb != NULL && __net != NULL) {
+    int res = vkWaitForFences(r->vkd, 1, &r->render_fence, VK_TRUE, 4294967296);
+    if(res != VK_SUCCESS) {
+      fprintf(stderr, "failed to wait for render fence (%d)\n", res);
+      return;
+    }
     record_command_buffers(__r, __net);
   }
 }
@@ -751,7 +804,7 @@ int bind_bufs(struct vulkanrt *r, const struct network *net)
       .size = VK_WHOLE_SIZE
     }
   };
-  vkFlushMappedMemoryRanges(r->vkd, 3, mmr);
+  vkFlushMappedMemoryRanges(r->vkd, 2, mmr);
   vkUnmapMemory(r->vkd, r->bufs.node_mem);
   vkUnmapMemory(r->vkd, r->bufs.link_mem);
 
@@ -1424,6 +1477,27 @@ int create_semaphores(struct vulkanrt *r)
   return 0;
 }
 
+int create_fences(struct vulkanrt *r)
+{
+  VKFN(r->vkdl, vkCreateFence, r->vkd);
+  if(!vkCreateFence)
+    return 1;
+
+  VkFenceCreateInfo fci = {
+    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+  };
+
+  int res = vkCreateFence(r->vkd, &fci, NULL, &r->render_fence);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr,
+        "failed to create rendering fence (%d)\n", res);
+    return 1;
+  }
+  return 0;
+}
+
 int record_command_buffers(struct vulkanrt *r, const struct network *net)
 {
   VkCommandBufferBeginInfo bi = {
@@ -1529,6 +1603,10 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
 
 void draw(struct vulkanrt *r)
 {
+  VKFN(r->vkdl, vkWaitForFences, r->vkd);
+  if(!vkWaitForFences)
+    return;
+
   /* get a handle for the next image to present */
   VKFN(r->vkdl, vkAcquireNextImageKHR, r->vkd);
   if(!vkAcquireNextImageKHR)
@@ -1569,14 +1647,23 @@ void draw(struct vulkanrt *r)
     .pSignalSemaphores = &r->rendering_finished
   };
 
-  VkResult res = vkQueueSubmit(
+  VKFN(r->vkdl, vkResetFences, r->vkd);
+  if(!vkResetFences)
+    return;
+
+  VkResult res = vkResetFences(r->vkd, 1, &r->render_fence);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "warning: failed to reset render fence (%d)\n", res);
+  }
+
+  res = vkQueueSubmit(
       r->graphicsq,
       1,              /* number of items to submit */
       &si,            /* the item to submit */
-      VK_NULL_HANDLE  /* no memory fence required */
+      r->render_fence  /* no memory fence required */
   );
   if(res != VK_SUCCESS) {
-    fprintf(stderr, "failed to submit command buffer[%u] to queue %d", img_idx,
+    fprintf(stderr, "failed to submit command buffer[%u] to queue %d\n", img_idx,
         res);
     return;
   }
@@ -1609,6 +1696,13 @@ void draw(struct vulkanrt *r)
       fprintf(stderr, "major post shitmuffin\n");
       return;
   }
+
+  res = vkWaitForFences(r->vkd, 1, &r->render_fence, VK_TRUE, 4294967296);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "draw: failed to wait for render fence (%d)\n", res);
+    return;
+  }
+
 
 }
 

@@ -37,4 +37,4 @@ add_custom_target(shaders DEPENDS ${CMAKE_BINARY_DIR}/fragment.frag.sipr ${CMAKE
 
 add_executable(toucan main.c toucan.c spock.c nets.c graphics.c layout.c)
 add_dependencies(toucan shaders)
-target_link_libraries(toucan glfw)
+target_link_libraries(toucan glfw m dl)

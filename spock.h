@@ -82,6 +82,11 @@ struct vulkanrt {
   VkExtent2D surface_area;
   VkClearValue clear;
 
+  VkFence render_fence;
+
+  uint32_t nqps;
+  VkQueueFamilyProperties *qps;
+
   float *world;
   float x, y, zoom;
   float pan_delta, zoom_delta;
@@ -116,6 +121,8 @@ static inline struct vulkanrt new_vulkanrt() {
     .scissors = NULL,
     .images = NULL,
     .framebuffers = NULL,
+    .qps = NULL,
+    .nqps = 0,
     .graphicsq_family_index = 0,
     .presentq_family_index = 0,
     .graphicsq_index = 0,
@@ -143,6 +150,7 @@ static inline struct vulkanrt new_vulkanrt() {
     .link_pipeline_layout = VK_NULL_HANDLE,
     .image_ready = VK_NULL_HANDLE,
     .rendering_finished = VK_NULL_HANDLE,
+    .render_fence = VK_NULL_HANDLE,
 
     /* glfw */
     .win = 0,
@@ -187,8 +195,10 @@ int init_graphics_pipeline(struct vulkanrt*, VkPrimitiveTopology pt,
     VkPipelineLayout *layout, VkPipeline *pipeline);
 int create_swapchain(struct vulkanrt*);
 int create_render_pass(struct vulkanrt*);
+int init_khr(struct vulkanrt*);
 int create_framebuffers(struct vulkanrt*);
 int create_semaphores(struct vulkanrt*);
+int create_fences(struct vulkanrt*);
 int record_command_buffers(struct vulkanrt*, const struct network*);
 int get_queue_info(struct vulkanrt*);
 int world_matrix(struct vulkanrt*);
