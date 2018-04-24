@@ -10,11 +10,12 @@ static void die(struct vulkanrt *r, struct network *n);
 int main(void)
 {
   struct network net = dcomp();
+  //struct network net = barbell();
 
   Ptree *ptr = ptree(&net, 1);
-  for(int i=0; i<50; i++) {
+  for(int i=0; i<100; i++) {
     layout(&net, ptr);
-    if(i%5 == 0) {
+    if(i%1 == 0) {
       ptr = ptree(&net, 0);
     }
   }
@@ -29,10 +30,11 @@ int main(void)
   if(configure_vulkan(&r, &net))
     die(&r, &net);
 
+  draw(&r);
   while(!glfwWindowShouldClose(r.win)) {
     // the toucan is flying
     glfwPollEvents();
-    draw(&r);
+    //draw(&r);
   }
 
   free_vulkanrt(&r);

@@ -31,14 +31,15 @@ Ptree* ptree(struct network *net, int init)
     ptr->leaves[i].position = &net->nodes[i];
   }
 
+  float init_radius = 2.0f * net->n;
 
   if(init) {
     /* initially distribute the nodes in a small circle */
     float incr = 2*M_PI/net->n;
     for(uint32_t i=0; i<net->n; i++)
     {
-      ptr->leaves[i].position->x = INITIAL_RADIUS * cos(i*incr);
-      ptr->leaves[i].position->y = INITIAL_RADIUS * sin(i*incr);
+      ptr->leaves[i].position->x = init_radius * cos(i*incr);
+      ptr->leaves[i].position->y = init_radius * sin(i*incr);
     }
   }
 
@@ -62,9 +63,9 @@ Ptree* ptree(struct network *net, int init)
   {
     uint32_t x = net->links[i];
     float v = ptr->leaves[x].valence;
-    if(v < 15.0f)
+    if(v < 15.0f) {
       v = 15.0f;
-
+    }
     ptr->leaves[x].base.mass = v*10;
   }
 

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "toucan.h"
-
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
+
+#include "toucan.h"
 
 #define UNUSED(x) (void)(x)
 
@@ -15,11 +15,11 @@
   }
 
 struct network_resources {
-  VkBuffer node_buffer,
-           link_buffer;
+  VkBuffer node_buffer, node_buffer_staging,
+           link_buffer, link_buffer_staging;
 
-  VkDeviceMemory node_mem,
-                 link_mem;
+  VkDeviceMemory node_mem, node_mem_staging,
+                 link_mem, link_mem_staging;
 };
 
 struct image_resources {
@@ -76,13 +76,13 @@ struct vulkanrt {
   VkPipeline node_pipeline, link_pipeline;
   VkPipelineLayout node_pipeline_layout, link_pipeline_layout;
 
-  VkSemaphore image_ready,
-              rendering_finished;
+  VkSemaphore *image_ready,
+              *rendering_finished;
 
   VkExtent2D surface_area;
   VkClearValue clear;
 
-  VkFence render_fence;
+  VkFence *render_fence;
 
   uint32_t nqps;
   VkQueueFamilyProperties *qps;
@@ -96,7 +96,8 @@ struct vulkanrt {
 
   /* data */
   struct network_resources bufs;
-  uint32_t memory_type_index;
+  uint32_t host_memory_type_index,
+           local_memory_type_index;
 };
 
 static inline struct vulkanrt new_vulkanrt() {
@@ -131,6 +132,8 @@ static inline struct vulkanrt new_vulkanrt() {
     .frag_sipr_sz = 0,
     .nvib = 0,
     .nvattr = 0,
+    .local_memory_type_index = 0,
+    .host_memory_type_index = 0,
     .nviewports = 1,
     .nscissors = 1,
     .nimg = 0,
@@ -161,10 +164,10 @@ static inline struct vulkanrt new_vulkanrt() {
     },
 
     .bufs = {
-      .node_buffer = NULL,
-      .link_buffer = NULL,
-      .node_mem = VK_NULL_HANDLE,
-      .link_mem = VK_NULL_HANDLE
+      .node_buffer = NULL, .node_buffer_staging = NULL,
+      .link_buffer = NULL, .link_buffer_staging = NULL,
+      .node_mem = VK_NULL_HANDLE, .node_mem_staging = VK_NULL_HANDLE,
+      .link_mem = VK_NULL_HANDLE, .link_mem_staging = VK_NULL_HANDLE
     },
 
     .extent = {
@@ -188,7 +191,8 @@ int configure_vulkan(struct vulkanrt*, const struct network*);
 int free_vulkanrt(struct vulkanrt*);
 struct network init_data();
 int net_bufs(struct vulkanrt*, const struct network*);
-int bind_bufs(struct vulkanrt*, const struct network*);
+int choose_memory(struct vulkanrt*);
+int init_gpu_data(struct vulkanrt*, const struct network*);
 int create_command_pool(struct vulkanrt*);
 int load_shaders(struct vulkanrt*);
 int init_graphics_pipeline(struct vulkanrt*, VkPrimitiveTopology pt,
@@ -196,6 +200,9 @@ int init_graphics_pipeline(struct vulkanrt*, VkPrimitiveTopology pt,
 int create_swapchain(struct vulkanrt*);
 int create_render_pass(struct vulkanrt*);
 int init_khr(struct vulkanrt*);
+int create_buffer(struct vulkanrt*, uint32_t, VkBufferUsageFlags, 
+    VkBuffer*, uint32_t, VkDeviceMemory*);
+int alloc_mem(struct vulkanrt*, uint32_t, uint32_t, VkDeviceMemory*);
 int create_framebuffers(struct vulkanrt*);
 int create_semaphores(struct vulkanrt*);
 int create_fences(struct vulkanrt*);

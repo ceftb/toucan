@@ -34,7 +34,7 @@
 /* the radius of the initial layout distribution circle, before the layout
  * algorithm begins, the nodes are laid out evenly over the edge of a circle
  * with this radius */
-#define INITIAL_RADIUS 50
+#define INITIAL_RADIUS 100
 
 typedef enum PNTYPE { NODE, LEAF } PnType;
 
