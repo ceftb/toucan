@@ -17,6 +17,9 @@ int free_vulkanrt(struct vulkanrt *r)
   int ret = 0;
   int err;
 
+  // wait for all rendering operations to finish
+  vkWaitForFences(r->vkd, 2, r->render_fence, VK_TRUE, 4294967296);
+
   /* destroy the data */
   printf("destroying data\n");
   VKFN(r->vkdl, vkFreeMemory, r->vkd);
@@ -600,8 +603,10 @@ int configure_vulkan(struct vulkanrt *r, const struct network *n)
     return 1;
 
 
-  if(record_command_buffers(r, n))
-    return 1;
+  for(uint32_t i=0; i<r->nimg; i++) {
+    if(record_command_buffers(r, n, i))
+      return 1;
+  }
 
   return 0;
 
@@ -729,17 +734,6 @@ void update_world(struct vulkanrt *r)
         bottom = ( h2)*r->zoom + r->y;
 
   orthom(left, right, top, bottom, 0, 10, r->world);
-
-  if(r != NULL && r->vkb != NULL && __net != NULL) {
-    /*
-    int res = vkWaitForFences(r->vkd, 1, &r->render_fence, VK_TRUE, 4294967296);
-    if(res != VK_SUCCESS) {
-      fprintf(stderr, "failed to wait for render fence (%d)\n", res);
-      return;
-    }
-    */
-    record_command_buffers(__r, __net);
-  }
 }
 
 int alloc_mem(struct vulkanrt *r, uint32_t size, uint32_t index,
@@ -1578,7 +1572,7 @@ int create_fences(struct vulkanrt *r)
   VkFenceCreateInfo fci = {
     .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     .pNext = NULL,
-    .flags = 0,
+    .flags = VK_FENCE_CREATE_SIGNALED_BIT
   };
 
   r->render_fence = malloc(r->nimg*sizeof(VkFence));
@@ -1594,7 +1588,7 @@ int create_fences(struct vulkanrt *r)
   return 0;
 }
 
-int record_command_buffers(struct vulkanrt *r, const struct network *net)
+int record_command_buffers(struct vulkanrt *r, const struct network *net, uint32_t i)
 {
   VkCommandBufferBeginInfo bi = {
     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1603,55 +1597,53 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
     .pInheritanceInfo = NULL
   };
 
-  for(uint32_t i=0; i<r->nimg; i++) {
-    vkBeginCommandBuffer(r->vkb[i], &bi);
+  vkBeginCommandBuffer(r->vkb[i], &bi);
 
-    VkRenderPassBeginInfo rpbi = {
-      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-      .pNext = NULL,
-      .renderPass = r->render_pass,
-      .framebuffer = r->framebuffers[i],
-      .renderArea = {
-        .offset = { .x = 0.0f, .y = 0.0f },
-        .extent = r->surface_area
-      },
-      .clearValueCount = 1,
-      .pClearValues = &r->clear
-    };
-    vkCmdBeginRenderPass(r->vkb[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+  VkRenderPassBeginInfo rpbi = {
+    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+    .pNext = NULL,
+    .renderPass = r->render_pass,
+    .framebuffer = r->framebuffers[i],
+    .renderArea = {
+      .offset = { .x = 0.0f, .y = 0.0f },
+      .extent = r->surface_area
+    },
+    .clearValueCount = 1,
+    .pClearValues = &r->clear
+  };
+  vkCmdBeginRenderPass(r->vkb[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
-        VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, r->world);
+  vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
+      VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, r->world);
 
-    /* node rendering */
-    vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->node_pipeline);
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
-    vkCmdDraw(r->vkb[i],
-        net->n, /* vertex count */
-        net->n, /* instance count */
-        0,         /* first vertex */
-        0          /* first instance */
-    );
+  /* node rendering */
+  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->node_pipeline);
+  VkDeviceSize offset = 0;
+  vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
+  vkCmdDraw(r->vkb[i],
+      net->n, /* vertex count */
+      net->n, /* instance count */
+      0,         /* first vertex */
+      0          /* first instance */
+      );
 
-    /* link rendering */
-    vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
-    vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(r->vkb[i], 
-        net->l*2, /* vertex count (nodes) (2 per line) */
-        net->l, /* instance count (lines) */
-        0,         /* first index */
-        0,         /* vertex offset */
-        0          /* first instance */
-    );
+  /* link rendering */
+  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
+  vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
+  vkCmdDrawIndexed(r->vkb[i], 
+      net->l*2, /* vertex count (nodes) (2 per line) */
+      net->l, /* instance count (lines) */
+      0,         /* first index */
+      0,         /* vertex offset */
+      0          /* first instance */
+      );
 
 
-    vkCmdEndRenderPass(r->vkb[i]);
-    int res = vkEndCommandBuffer(r->vkb[i]);
-    if(res != VK_SUCCESS) {
-      fprintf(stderr, "failed to end cmd buffer @ index %d (%d)\n", i, res);
-      return 1;
-    }
+  vkCmdEndRenderPass(r->vkb[i]);
+  int res = vkEndCommandBuffer(r->vkb[i]);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "failed to end cmd buffer @ index %d (%d)\n", i, res);
+    return 1;
   }
 
   return 0;
@@ -1659,13 +1651,28 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
 
 void draw(struct vulkanrt *r)
 {
-  static size_t rix = 0; //resource index
+  static int rix = -1; //resource index
   rix = (rix+1) % r->nimg;
-  printf("resource %lu\n", rix);
+  printf("resource %d\n", rix);
+
+  VkResult res = vkWaitForFences(r->vkd, 1, &r->render_fence[rix], VK_TRUE, 4294967296);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "draw: failed to wait for render fence (%d)\n", res);
+    return;
+  }
+
+  res = vkResetFences(r->vkd, 1, &r->render_fence[rix]);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "warning: failed to reset render fence (%d)\n", res);
+  }
+
+  record_command_buffers(r, __net, (uint32_t)rix);
 
   uint32_t img_idx;
   VkResult result = vkAcquireNextImageKHR(
       r->vkd, r->swapchain, UINT64_MAX, r->image_ready[rix], VK_NULL_HANDLE, &img_idx);
+
+  printf("image %u \n", img_idx);
 
   /* determine what to do */
   switch(result) {
@@ -1695,10 +1702,6 @@ void draw(struct vulkanrt *r)
     .pSignalSemaphores = &r->rendering_finished[rix]
   };
 
-  VkResult res = vkResetFences(r->vkd, 1, &r->render_fence[rix]);
-  if(res != VK_SUCCESS) {
-    fprintf(stderr, "warning: failed to reset render fence (%d)\n", res);
-  }
 
   res = vkQueueSubmit(
       r->graphicsq,
@@ -1737,11 +1740,6 @@ void draw(struct vulkanrt *r)
       return;
   }
 
-  res = vkWaitForFences(r->vkd, 1, &r->render_fence[rix], VK_TRUE, 4294967296);
-  if(res != VK_SUCCESS) {
-    fprintf(stderr, "draw: failed to wait for render fence (%d)\n", res);
-    return;
-  }
 
 
 }

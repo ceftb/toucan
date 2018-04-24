@@ -206,7 +206,7 @@ int alloc_mem(struct vulkanrt*, uint32_t, uint32_t, VkDeviceMemory*);
 int create_framebuffers(struct vulkanrt*);
 int create_semaphores(struct vulkanrt*);
 int create_fences(struct vulkanrt*);
-int record_command_buffers(struct vulkanrt*, const struct network*);
+int record_command_buffers(struct vulkanrt*, const struct network*, uint32_t);
 int get_queue_info(struct vulkanrt*);
 int world_matrix(struct vulkanrt*);
 void update_world(struct vulkanrt*);
