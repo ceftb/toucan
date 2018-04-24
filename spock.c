@@ -228,6 +228,7 @@ int create_instance(struct vulkanrt *r)
     .apiVersion = VK_MAKE_VERSION(1, 0, 0)
   };
 
+#ifdef DEBUG
   #define NUM_LAYERS 1
   const char* layers[NUM_LAYERS] = {
     "VK_LAYER_LUNARG_standard_validation",
@@ -243,6 +244,19 @@ int create_instance(struct vulkanrt *r)
     .enabledExtensionCount = NUM_VK_EXT,
     .ppEnabledExtensionNames = vkx
   };
+#else
+  #define NUM_LAYERS 0
+  VkInstanceCreateInfo instance_create_info = {
+    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .pApplicationInfo = &application_info,
+    .enabledLayerCount = NUM_LAYERS,
+    .ppEnabledLayerNames = NULL, 
+    .enabledExtensionCount = NUM_VK_EXT,
+    .ppEnabledExtensionNames = vkx
+  };
+#endif
 
   if(vkCreateInstance(&instance_create_info, NULL, &r->vki) != VK_SUCCESS) {
     fprintf(stderr, "failed to create vulkan instance\n");
@@ -1579,15 +1593,15 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net)
     );
 
     /* link rendering */
-    vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
-    vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(r->vkb[i], 
-        net->l*2, /* vertex count (nodes) (2 per line) */
-        net->l, /* instance count (lines) */
-        0,         /* first index */
-        0,         /* vertex offset */
-        0          /* first instance */
-    );
+    //vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
+    //vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
+    //vkCmdDrawIndexed(r->vkb[i], 
+    //    net->l*2, /* vertex count (nodes) (2 per line) */
+    //    net->l, /* instance count (lines) */
+    //    0,         /* first index */
+    //    0,         /* vertex offset */
+    //    0          /* first instance */
+    //);
 
 
     vkCmdEndRenderPass(r->vkb[i]);

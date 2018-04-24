@@ -9,7 +9,7 @@ static void die(struct vulkanrt *r, struct network *n);
 
 int main(void)
 {
-  struct network net = barbell_nolayout();
+  struct network net = dcomp();
 
   Ptree *ptr = ptree(&net, 1);
   for(int i=0; i<50; i++) {
