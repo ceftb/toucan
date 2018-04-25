@@ -15,6 +15,7 @@ float* ident()
   return m;
 }
 
+/*
 float* ortho(float left, float right, float top, float bottom, float near, 
     float far)
 {
@@ -22,24 +23,26 @@ float* ortho(float left, float right, float top, float bottom, float near,
   orthom(left, right, top, bottom, near, far, m);
   return m;
 }
+*/
 
-void orthom(float left, float right, float top, float bottom, float near, 
-    float far, float *m)
+mat4_t 
+orthom(float left, float right, float top, float bottom, float near, float far)
 {
   float w = 2.0f/(right-left),
         h = 2.0f/(bottom-top),
-        d = 2.0f/(near-far),
+        d = 1.0f/(near-far),
         p = -(right+left)/(right-left),
         q = -(bottom+top)/(bottom-top),
         r = near/(near-far);
 
-  float _m[16] = {
+  return mat4(
     w,    0.0f, 0.0f, 0.0f,
     0.0f, h,    0.0f, 0.0f,
     0.0f, 0.0f, d,    0.0f,
     p,    q,    r,    1.0f
-  };
+  );
+  //return m4_ortho(left, right, bottom, top, far, near);
 
-  memcpy(m, _m, 16*sizeof(float));
+  //memcpy(m, _m, 16*sizeof(float));
 }
 

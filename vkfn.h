@@ -47,6 +47,7 @@ DECL_VKFN(vkCmdDrawIndexed);
 DECL_VKFN(vkCmdEndRenderPass);
 DECL_VKFN(vkCmdBindVertexBuffers);
 DECL_VKFN(vkCmdBindIndexBuffer);
+DECL_VKFN(vkQueueWaitIdle);
 
 static inline int vkfn_device_init(struct vulkanrt *r) {
 
@@ -86,6 +87,7 @@ static inline int vkfn_device_init(struct vulkanrt *r) {
   DEF_VKFN(r->vkdl, vkCmdEndRenderPass, r->vkd);
   DEF_VKFN(r->vkdl, vkCmdBindVertexBuffers, r->vkd);
   DEF_VKFN(r->vkdl, vkCmdBindIndexBuffer, r->vkd);
+  DEF_VKFN(r->vkdl, vkQueueWaitIdle, r->vkd);
 
   return 0;
 }

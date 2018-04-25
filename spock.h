@@ -1,10 +1,12 @@
 #pragma once
 
+#define _GLFW_VULKAN_LIBRARY "amdvlk64.so"
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include "toucan.h"
+#include "math_3d.h"
 
 #define UNUSED(x) (void)(x)
 
@@ -87,7 +89,7 @@ struct vulkanrt {
   uint32_t nqps;
   VkQueueFamilyProperties *qps;
 
-  float *world;
+  mat4_t world;
   float x, y, zoom;
   float pan_delta, zoom_delta;
 
@@ -186,6 +188,9 @@ static inline struct vulkanrt new_vulkanrt() {
 int init_glfw(struct vulkanrt*);
 void glfw_key_callback(GLFWwindow *w, int key, int scancode, int action, int mods);
 void glfw_error_callback(int error, const char* description);
+void glfw_scroll_callback(GLFWwindow*, double, double);
+void glfw_mouse_move_callback(GLFWwindow*, double, double);
+void glfw_mouse_button_callback(GLFWwindow *w, int button, int action, int mods);
 int init_vulkan(struct vulkanrt*);
 int configure_vulkan(struct vulkanrt*, const struct network*);
 int free_vulkanrt(struct vulkanrt*);
@@ -196,7 +201,7 @@ int init_gpu_data(struct vulkanrt*, const struct network*);
 int create_command_pool(struct vulkanrt*);
 int load_shaders(struct vulkanrt*);
 int init_graphics_pipeline(struct vulkanrt*, VkPrimitiveTopology pt,
-    VkPipelineLayout *layout, VkPipeline *pipeline);
+    VkVertexInputRate, VkPipelineLayout *layout, VkPipeline *pipeline);
 int create_swapchain(struct vulkanrt*);
 int create_render_pass(struct vulkanrt*);
 int init_khr(struct vulkanrt*);

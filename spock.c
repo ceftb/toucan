@@ -2,11 +2,16 @@
 #include <stdio.h>
 #include <dlfcn.h>
 #include <string.h>
+#include <math.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "vkfn.h"
 #include "spock.h"
 #include "graphics.h"
+
+#define MATH_3D_IMPLEMENTATION
+#include "math_3d.h"
 
 //so we can access from glfw callbacks
 struct vulkanrt *__r = NULL;
@@ -18,7 +23,7 @@ int free_vulkanrt(struct vulkanrt *r)
   int err;
 
   // wait for all rendering operations to finish
-  vkWaitForFences(r->vkd, 2, r->render_fence, VK_TRUE, 4294967296);
+  vkWaitForFences(r->vkd, r->nimg, r->render_fence, VK_TRUE, 4294967296);
 
   /* destroy the data */
   printf("destroying data\n");
@@ -37,7 +42,7 @@ int free_vulkanrt(struct vulkanrt *r)
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer_staging, NULL);
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer, NULL);
   }
-  free(r->world);
+  //free(r->world);
 
   /* destroy swapchain */
   printf("destroying swapchain\n");
@@ -225,12 +230,11 @@ int create_instance(struct vulkanrt *r)
   if(!vkCreateInstance)
     return 1;
 
-  #define NUM_VK_EXT 4
+  #define NUM_VK_EXT 3
   const char* vkx[NUM_VK_EXT] = {
     "VK_KHR_surface",
     "VK_KHR_xcb_surface",
-    "VK_KHR_xlib_surface",
-    "VK_KHR_wayland_surface",
+    "VK_KHR_xlib_surface"
   };
 
   VkApplicationInfo application_info = {
@@ -506,7 +510,8 @@ int create_device(struct vulkanrt *r) {
 
 int init_vulkan(struct vulkanrt *r)
 {
-  r->vk = dlopen("libvulkan.so.1", RTLD_NOW);
+  //r->vk = dlopen("libvulkan.so.1", RTLD_NOW);
+  r->vk = dlopen("/usr/lib64/amdvlk64.so", RTLD_NOW);
   if(!r->vk){
 
     fprintf(stderr, "failed to load vulkan\n");
@@ -588,11 +593,13 @@ int configure_vulkan(struct vulkanrt *r, const struct network *n)
   if(create_framebuffers(r))
     return 1;
 
-  if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 
+  if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
+        VK_VERTEX_INPUT_RATE_VERTEX,
         &r->node_pipeline_layout, &r->node_pipeline))
     return 1;
 
   if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+        VK_VERTEX_INPUT_RATE_VERTEX,
         &r->link_pipeline_layout, &r->link_pipeline))
     return 1;
 
@@ -668,7 +675,8 @@ int net_bufs(struct vulkanrt *r, const struct network *net)
         net->n*sizeof(struct point2), 
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
         &r->bufs.node_buffer_staging,
-        r->host_memory_type_index, &r->bufs.node_mem_staging)
+        r->host_memory_type_index, 
+        &r->bufs.node_mem_staging)
   ) {
     fprintf(stderr, "creating node staging buffer failed\n");
     return 1;
@@ -718,7 +726,7 @@ int net_bufs(struct vulkanrt *r, const struct network *net)
 
 int world_matrix(struct vulkanrt *r)
 {
-  r->world = malloc(16*sizeof(float));
+  //r->world = malloc(16*sizeof(float));
   update_world(r);
   return 0;
 }
@@ -733,7 +741,7 @@ void update_world(struct vulkanrt *r)
         top    = (-h2)*r->zoom + r->y,
         bottom = ( h2)*r->zoom + r->y;
 
-  orthom(left, right, top, bottom, 0, 10, r->world);
+  r->world = orthom(left, right, top, bottom, 0, 10);
 }
 
 int alloc_mem(struct vulkanrt *r, uint32_t size, uint32_t index,
@@ -834,8 +842,8 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
                        lmem_req;
                        //wmem_req;
 
-  vkGetBufferMemoryRequirements(r->vkd, r->bufs.node_buffer_staging, &nmem_req);
-  vkGetBufferMemoryRequirements(r->vkd, r->bufs.link_buffer_staging, &lmem_req);
+  vkGetBufferMemoryRequirements(r->vkd, r->bufs.node_buffer, &nmem_req);
+  vkGetBufferMemoryRequirements(r->vkd, r->bufs.link_buffer, &lmem_req);
 
   printf("node memory %lu\n", nmem_req.size);
 
@@ -1035,7 +1043,7 @@ int load_shaders(struct vulkanrt *r)
 }
 
 int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
-    VkPipelineLayout *layout, VkPipeline *pipeline)
+    VkVertexInputRate vir, VkPipelineLayout *layout, VkPipeline *pipeline)
 {
   /* create the pipeline parameters */
   VkPipelineShaderStageCreateInfo shaders[] = {
@@ -1062,7 +1070,7 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
   VkVertexInputBindingDescription vkib = {
     .binding = 0,
     .stride = 2*sizeof(float),
-    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    .inputRate = vir,
   };
 
   VkVertexInputAttributeDescription vkad = {
@@ -1136,7 +1144,7 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
     .depthBiasConstantFactor = 0.0,
     .depthBiasClamp = 0.0,
     .depthBiasSlopeFactor = 0.0,
-    .lineWidth = 4.0
+    .lineWidth = 1.0
   };
 
   VkPipelineMultisampleStateCreateInfo msci = {
@@ -1242,8 +1250,8 @@ uint32_t decide_num_img(VkSurfaceCapabilitiesKHR *sc)
   uint32_t ret;
   /* maxImageCount = 0 indicates no limit on # of images according to vulkan 
    * spec */
-  if(sc->maxImageCount == 0 || sc->maxImageCount >= 2)
-    ret = 2;
+  if(sc->maxImageCount == 0 || sc->maxImageCount >= 3)
+    ret = 3;
   else
     ret = sc->maxImageCount;
 
@@ -1277,15 +1285,20 @@ VkPresentModeKHR decide_present_mode(VkPresentModeKHR *modes, uint32_t count)
 
   for(uint32_t i=0; i<count; i++)
   {
-    if(modes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+    if(modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+      printf("mailbox mode\n");
       return modes[i];
+    }
     else if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR)
       immediate = VK_TRUE;
   }
 
-  if(immediate)
+  if(immediate) {
+    printf("immediate mode\n");
     return VK_PRESENT_MODE_IMMEDIATE_KHR;
+  }
   
+  printf("fifo mode\n");
   return  VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -1370,7 +1383,7 @@ int create_swapchain(struct vulkanrt *r)
     .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
     .queueFamilyIndexCount = 0,
     .pQueueFamilyIndices = NULL,
-    .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ,
+    .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
     .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
     .presentMode = decide_present_mode(modes, nmode),
     .clipped = VK_TRUE,
@@ -1614,29 +1627,31 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net, uint32
   vkCmdBeginRenderPass(r->vkb[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
   vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
-      VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, r->world);
+      VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, &r->world.m[0]);
 
   /* node rendering */
   vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->node_pipeline);
   VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
   vkCmdDraw(r->vkb[i],
-      net->n, /* vertex count */
-      net->n, /* instance count */
+      net->n,    /* vertex count */
+      net->n,    /* instance count */
       0,         /* first vertex */
       0          /* first instance */
       );
 
   /* link rendering */
+#if 0
   vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
   vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
   vkCmdDrawIndexed(r->vkb[i], 
-      net->l*2, /* vertex count (nodes) (2 per line) */
-      net->l, /* instance count (lines) */
+      net->l*2,  /* vertex count (nodes) (2 per line) */
+      net->l,    /* instance count (lines) */
       0,         /* first index */
       0,         /* vertex offset */
       0          /* first instance */
       );
+#endif
 
 
   vkCmdEndRenderPass(r->vkb[i]);
@@ -1655,7 +1670,10 @@ void draw(struct vulkanrt *r)
   rix = (rix+1) % r->nimg;
   printf("resource %d\n", rix);
 
-  VkResult res = vkWaitForFences(r->vkd, 1, &r->render_fence[rix], VK_TRUE, 4294967296);
+  VkResult res;
+
+  /*
+  res = vkWaitForFences(r->vkd, 1, &r->render_fence[rix], VK_FALSE, 500000);
   if(res != VK_SUCCESS) {
     fprintf(stderr, "draw: failed to wait for render fence (%d)\n", res);
     return;
@@ -1665,14 +1683,12 @@ void draw(struct vulkanrt *r)
   if(res != VK_SUCCESS) {
     fprintf(stderr, "warning: failed to reset render fence (%d)\n", res);
   }
+  */
 
-  record_command_buffers(r, __net, (uint32_t)rix);
 
   uint32_t img_idx;
   VkResult result = vkAcquireNextImageKHR(
       r->vkd, r->swapchain, UINT64_MAX, r->image_ready[rix], VK_NULL_HANDLE, &img_idx);
-
-  printf("image %u \n", img_idx);
 
   /* determine what to do */
   switch(result) {
@@ -1686,6 +1702,8 @@ void draw(struct vulkanrt *r)
       fprintf(stderr, "major shitmuffin\n");
       return;
   }
+  printf("image %u \n", img_idx);
+  record_command_buffers(r, __net, img_idx);
 
   /* time to submit command buffer to graphics/present queue */
 
@@ -1703,17 +1721,31 @@ void draw(struct vulkanrt *r)
   };
 
 
+  struct timeval start, finish;
+  gettimeofday(&start, NULL);
+
   res = vkQueueSubmit(
       r->graphicsq,
       1,              /* number of items to submit */
       &si,            /* the item to submit */
-      r->render_fence[rix]  /* no memory fence required */
+      //r->render_fence[rix]  /* no memory fence required */
+      VK_NULL_HANDLE
   );
   if(res != VK_SUCCESS) {
     fprintf(stderr, "failed to submit command buffer[%u] to queue %d\n", img_idx,
         res);
     return;
   }
+
+
+  vkQueueWaitIdle(r->graphicsq);
+  gettimeofday(&finish, NULL);
+
+  time_t secs = finish.tv_sec - start.tv_sec;
+  suseconds_t usecs = finish.tv_usec - start.tv_usec;
+  size_t millisecs = secs * 1e3 + ceil(usecs / 1e3);
+  printf("RENDERED: %lu\n", millisecs);
+  start = finish;
 
   /* queue an image for presentation */
   VkPresentInfoKHR pi = {
@@ -1740,7 +1772,13 @@ void draw(struct vulkanrt *r)
       return;
   }
 
+  vkQueueWaitIdle(r->graphicsq);
+  gettimeofday(&finish, NULL);
 
+  secs = finish.tv_sec - start.tv_sec;
+  usecs = finish.tv_usec - start.tv_usec;
+  millisecs = secs * 1e3 + ceil(usecs / 1e3);
+  printf("PRESENTED: %lu\n", millisecs);
 
 }
 
@@ -1774,7 +1812,7 @@ int init_glfw(struct vulkanrt *r)
   /* make sure glfw is ok with the chosen queue from init_vulkan */
   if(glfwGetPhysicalDevicePresentationSupport(
         r->vki, r->vkpd, r->graphicsq_family_index) != GLFW_TRUE) {
-    fprintf(stderr, "glfw cannot work with the chose queue\n");
+    fprintf(stderr, "glfw cannot work with the chosen queue\n");
     return 1;
   }
 
@@ -1789,6 +1827,9 @@ int init_glfw(struct vulkanrt *r)
   /* create vulkan surface attached to glfw window */
   glfwCreateWindowSurface(r->vki, r->win, NULL, &r->surface);
   glfwSetKeyCallback(r->win, glfw_key_callback);
+  glfwSetScrollCallback(r->win, glfw_scroll_callback);
+  glfwSetMouseButtonCallback(r->win, glfw_mouse_button_callback);
+  glfwSetCursorPosCallback(r->win, glfw_mouse_move_callback);
 
   return 0;
 }
@@ -1845,5 +1886,64 @@ void glfw_key_callback(GLFWwindow *w, int key, int scancode, int action, int mod
     update_world(__r);
     draw(__r);
   }
+
+}
+
+void glfw_scroll_callback(GLFWwindow *w, double xoffset, double yoffset)
+{
+  UNUSED(w);
+  UNUSED(xoffset);
+
+  __r->zoom -= yoffset;
+  if(__r->zoom < 1) {
+    __r->zoom = 1;
+  }
+  update_world(__r);
+  draw(__r);
+}
+
+static int dragging = 0;
+static float mx = 0.0f,
+             my = 0.0f;
+
+void glfw_mouse_button_callback(GLFWwindow *w, int button, int action, int mods)
+{
+  UNUSED(w);
+  UNUSED(mods);
+
+  if(button == GLFW_MOUSE_BUTTON_LEFT) {
+    if(action == GLFW_PRESS) {
+      printf("drag on\n");
+      dragging = 1;
+    }
+    if(action == GLFW_RELEASE) {
+      printf("drag off\n");
+      dragging = 0;
+    }
+  }
+
+}
+
+void glfw_mouse_move_callback(GLFWwindow *w, double x, double y) {
+
+  UNUSED(w);
+
+  if(dragging) {
+    float dx = mx - x,
+          dy = my - y,
+          z = __r->zoom;
+
+    vec3_t d = {.x = dx * z, .y = dy *z, .z = 0 };
+
+    __r->x += d.x;
+    __r->y += d.y;
+
+    update_world(__r);
+    draw(__r);
+    printf("x,y: (%f, %f) dx,dy: (%f,%f) ddx,ddy: (%f,%f)\n", x, y, dx, dy, d.x, d.y);
+  }
+
+  mx = x;
+  my = y;
 
 }
