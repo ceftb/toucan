@@ -1246,7 +1246,7 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
     .depthBiasConstantFactor = 0.0,
     .depthBiasClamp = 0.0,
     .depthBiasSlopeFactor = 0.0,
-    .lineWidth = 1.0
+    .lineWidth = 1.0 
   };
 
   VkPipelineMultisampleStateCreateInfo msci = {
@@ -1743,8 +1743,8 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net,
       r->node_pipeline);
   //XXX hardcode node color
   r->constants.color[0] = 0.7f;
-  r->constants.color[1] = 0.7f;
-  r->constants.color[2] = 0.7f;
+  r->constants.color[1] = 0.0f;
+  r->constants.color[2] = 0.0f;
   r->constants.color[3] = 1.0f;
   r->constants.z = 0;
 
@@ -1762,9 +1762,9 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net,
 #endif
   //XXX hardcode link color
   r->constants.color[0] = 0.0f;
-  r->constants.color[1] = 0.7f;
-  r->constants.color[2] = 0.7f;
-  r->constants.color[3] = 0.01f;
+  r->constants.color[1] = 0.4f;
+  r->constants.color[2] = 0.4f;
+  r->constants.color[3] = 1.0f;
   r->constants.z = -10;
 
 #if 0

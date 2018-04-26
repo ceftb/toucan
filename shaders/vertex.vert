@@ -15,7 +15,7 @@ out gl_PerVertex
 
 void main(){
 
-  gl_PointSize = 5;
+  gl_PointSize = 7;
 	gl_Position = vec4(position, constants.z, 1.0) * constants.world;
 
 }
