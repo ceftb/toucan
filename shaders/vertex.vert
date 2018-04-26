@@ -2,9 +2,10 @@
 
 layout(location = 0) in vec2 position;
 
-layout(push_constant) uniform World {
-  mat4 projection;
-} world;
+layout(push_constant) uniform Constants {
+  layout(offset = 0) mat4 world;
+  layout(offset = 64) float z;
+} constants;
 
 out gl_PerVertex
 {
@@ -14,10 +15,8 @@ out gl_PerVertex
 
 void main(){
 
-  gl_PointSize = 1;
-	//gl_Position = vec4(position, 0.0, 1.0);
-	//gl_Position = world.projection * vec4(position, 0.0, 1.0);
-	gl_Position = vec4(position, 0.0, 1.0) * world.projection;
+  gl_PointSize = 5;
+	gl_Position = vec4(position, constants.z, 1.0) * constants.world;
 
 }
 

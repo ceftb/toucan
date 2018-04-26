@@ -3,6 +3,7 @@
 #include "math_3d.h"
 
 #define MAT4_SIZE 16*sizeof(float)
+#define VEC4_SIZE 5*sizeof(float)
 
 float* ident();
 

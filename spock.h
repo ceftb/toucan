@@ -18,10 +18,12 @@
 
 struct network_resources {
   VkBuffer node_buffer, node_buffer_staging,
-           link_buffer, link_buffer_staging;
+           link_buffer, link_buffer_staging,
+           tlink_buffer, tlink_buffer_staging;
 
   VkDeviceMemory node_mem, node_mem_staging,
-                 link_mem, link_mem_staging;
+                 link_mem, link_mem_staging,
+                 tlink_mem, tlink_mem_staging;
 };
 
 struct image_resources {
@@ -31,6 +33,12 @@ struct image_resources {
   VkDeviceMemory memory;
 };
 
+typedef struct constants {
+  mat4_t world;
+  float z;
+  float pad[3];
+  float color[4];
+} __attribute__((packed)) Constants;
 
 struct vulkanrt {
   /* vulkan */
@@ -89,7 +97,8 @@ struct vulkanrt {
   uint32_t nqps;
   VkQueueFamilyProperties *qps;
 
-  mat4_t world;
+  //mat4_t world;
+  Constants constants;
   float x, y, zoom;
   float pan_delta, zoom_delta;
 
@@ -162,14 +171,16 @@ static inline struct vulkanrt new_vulkanrt() {
 
     .surface_area = {
       .width = 1000,
-      .height = 700
+      .height = 1000
     },
 
     .bufs = {
       .node_buffer = NULL, .node_buffer_staging = NULL,
       .link_buffer = NULL, .link_buffer_staging = NULL,
+      .tlink_buffer = NULL, .tlink_buffer_staging = NULL,
       .node_mem = VK_NULL_HANDLE, .node_mem_staging = VK_NULL_HANDLE,
-      .link_mem = VK_NULL_HANDLE, .link_mem_staging = VK_NULL_HANDLE
+      .link_mem = VK_NULL_HANDLE, .link_mem_staging = VK_NULL_HANDLE,
+      .tlink_mem = VK_NULL_HANDLE, .tlink_mem_staging = VK_NULL_HANDLE
     },
 
     .extent = {

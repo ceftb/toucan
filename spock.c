@@ -31,8 +31,10 @@ int free_vulkanrt(struct vulkanrt *r)
   if(vkFreeMemory) {
     vkFreeMemory(r->vkd, r->bufs.node_mem, NULL);
     vkFreeMemory(r->vkd, r->bufs.link_mem, NULL);
+    vkFreeMemory(r->vkd, r->bufs.tlink_mem, NULL);
     vkFreeMemory(r->vkd, r->bufs.node_mem_staging, NULL);
     vkFreeMemory(r->vkd, r->bufs.link_mem_staging, NULL);
+    vkFreeMemory(r->vkd, r->bufs.tlink_mem_staging, NULL);
   }
 
   VKFN(r->vkdl, vkDestroyBuffer, r->vkd);
@@ -41,6 +43,8 @@ int free_vulkanrt(struct vulkanrt *r)
     vkDestroyBuffer(r->vkd, r->bufs.node_buffer, NULL);
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer_staging, NULL);
     vkDestroyBuffer(r->vkd, r->bufs.link_buffer, NULL);
+    vkDestroyBuffer(r->vkd, r->bufs.tlink_buffer_staging, NULL);
+    vkDestroyBuffer(r->vkd, r->bufs.tlink_buffer, NULL);
   }
   //free(r->world);
 
@@ -587,32 +591,46 @@ int configure_vulkan(struct vulkanrt *r, const struct network *n)
   if(init_gpu_data(r, n))
     return 1;
 
+  printf("creating render pass\n");
   if(create_render_pass(r))
     return 1;
+  printf("done\n");
 
+  printf("creating framebuffers\n");
   if(create_framebuffers(r))
     return 1;
+  printf("done\n");
 
+  printf("initializing gpipe 0\n");
   if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         VK_VERTEX_INPUT_RATE_VERTEX,
         &r->node_pipeline_layout, &r->node_pipeline))
     return 1;
+  printf("done\n");
 
+  printf("initializing gpipe 0\n");
   if(init_graphics_pipeline(r, VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
         VK_VERTEX_INPUT_RATE_VERTEX,
         &r->link_pipeline_layout, &r->link_pipeline))
     return 1;
+  printf("done\n");
 
+  printf("creating semaphores\n");
   if(create_semaphores(r))
     return 1;
+  printf("done\n");
   
+  printf("creating fences\n");
   if(create_fences(r))
     return 1;
+  printf("done\n");
 
 
   for(uint32_t i=0; i<r->nimg; i++) {
+    printf("recording command buffer %d\n", i);
     if(record_command_buffers(r, n, i))
       return 1;
+    printf("done\n");
   }
 
   return 0;
@@ -721,6 +739,31 @@ int net_bufs(struct vulkanrt *r, const struct network *net)
     return 1;
   }
 
+  /* tesselated link buffers */
+  if(create_buffer(
+        r,
+        net->t*sizeof(Point2),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        &r->bufs.tlink_buffer_staging,
+        r->host_memory_type_index,
+        &r->bufs.tlink_mem_staging)
+  ) {
+    fprintf(stderr, "creating tlink staging buffer failed\n");
+    return 1;
+  }
+  if(create_buffer(
+        r, 
+        net->t*sizeof(Point2),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
+        &r->bufs.tlink_buffer,
+        r->local_memory_type_index, 
+        &r->bufs.tlink_mem)
+  ) {
+    fprintf(stderr, "creating link local buffer failed\n");
+    return 1;
+  }
+
   return 0;
 }
 
@@ -741,7 +784,7 @@ void update_world(struct vulkanrt *r)
         top    = (-h2)*r->zoom + r->y,
         bottom = ( h2)*r->zoom + r->y;
 
-  r->world = orthom(left, right, top, bottom, 0, 10);
+  r->constants.world = orthom(left, right, top, bottom, 0, 10);
 }
 
 int alloc_mem(struct vulkanrt *r, uint32_t size, uint32_t index,
@@ -839,16 +882,19 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
 
   /* create memory requirements */
   VkMemoryRequirements nmem_req,
-                       lmem_req;
-                       //wmem_req;
+                       lmem_req,
+                       tlmem_req;
 
   vkGetBufferMemoryRequirements(r->vkd, r->bufs.node_buffer, &nmem_req);
   vkGetBufferMemoryRequirements(r->vkd, r->bufs.link_buffer, &lmem_req);
+  vkGetBufferMemoryRequirements(r->vkd, r->bufs.tlink_buffer, &tlmem_req);
 
   printf("node memory %lu\n", nmem_req.size);
+  printf("tlink memory %lu\n", tlmem_req.size);
 
+  printf("mapping node memory\n");
   /* map memory and copy data */
-  void *vm, *lm;
+  void *vm, *lm, *tlm;
   VkResult res = vkMapMemory(r->vkd, r->bufs.node_mem_staging, 0, nmem_req.size, 0, &vm);
   if(res != VK_SUCCESS) {
     fprintf(stderr, "failed to map node memory for copying (%d)\n", res);
@@ -856,12 +902,21 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
   }
   memcpy(vm, net->nodes, nmem_req.size);
 
+  printf("mapping link memory\n");
   res = vkMapMemory(r->vkd, r->bufs.link_mem_staging, 0, lmem_req.size, 0, &lm);
   if(res != VK_SUCCESS) {
     fprintf(stderr, "failed to map link memory for copying (%d)\n", res);
     return 1;
   }
   memcpy(lm, net->links, lmem_req.size);
+
+  printf("mapping tlink memory\n");
+  res = vkMapMemory(r->vkd, r->bufs.tlink_mem_staging, 0, tlmem_req.size, 0, &tlm);
+  if(res != VK_SUCCESS) {
+    fprintf(stderr, "failed to map tlink memory for copying (%d)\n", res);
+    return 1;
+  }
+  memcpy(tlm, net->tlinks, tlmem_req.size);
 
   /* unmap memory */
   VkMappedMemoryRange mmr[] = {
@@ -878,11 +933,23 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
       .memory = r->bufs.link_mem_staging,
       .offset = 0,
       .size = VK_WHOLE_SIZE
+    },
+    {
+      .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+      .pNext = NULL,
+      .memory = r->bufs.tlink_mem_staging,
+      .offset = 0,
+      .size = VK_WHOLE_SIZE
     }
   };
-  vkFlushMappedMemoryRanges(r->vkd, 2, mmr);
+  printf("flushing mapped memory\n");
+  vkFlushMappedMemoryRanges(r->vkd, 3, mmr);
+  printf("unmapping node memory\n");
   vkUnmapMemory(r->vkd, r->bufs.node_mem_staging);
+  printf("unmapping link memory\n");
   vkUnmapMemory(r->vkd, r->bufs.link_mem_staging);
+  printf("unmapping tlink memory\n");
+  vkUnmapMemory(r->vkd, r->bufs.tlink_mem_staging);
 
   /* copy data from staging buffer to local buffer */
   VkCommandBufferBeginInfo bi = {
@@ -899,24 +966,56 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
     .dstOffset = 0,
     .size = nmem_req.size
   };
+  printf("copying node memory to device\n");
   vkCmdCopyBuffer(r->vkb[0], r->bufs.node_buffer_staging, r->bufs.node_buffer, 1, &bc);
+
+  printf("copying link memory to device\n");
   bc.size = lmem_req.size;
   vkCmdCopyBuffer(r->vkb[0], r->bufs.link_buffer_staging, r->bufs.link_buffer, 1, &bc);
 
-  VkBufferMemoryBarrier mb = {
-    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-    .pNext = NULL,
-    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-    .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
-    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-    .buffer = r->bufs.node_buffer,
-    .offset = 0,
-    .size = VK_WHOLE_SIZE
-  };
-  vkCmdPipelineBarrier(r->vkb[0], VK_PIPELINE_STAGE_TRANSFER_BIT, 
-      VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, NULL, 1, &mb, 0, NULL);
+  printf("copying tlink memory to device\n");
+  bc.size = tlmem_req.size;
+  vkCmdCopyBuffer(r->vkb[0], r->bufs.tlink_buffer_staging, r->bufs.tlink_buffer, 1, &bc);
 
+  printf("setting copy memory barrier\n");
+  VkBufferMemoryBarrier mb[] = {
+    {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+      .pNext = NULL,
+      .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = r->bufs.node_buffer,
+      .offset = 0,
+      .size = VK_WHOLE_SIZE
+    },
+    {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+      .pNext = NULL,
+      .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = r->bufs.tlink_buffer,
+      .offset = 0,
+      .size = VK_WHOLE_SIZE
+    }
+  };
+  vkCmdPipelineBarrier(
+      r->vkb[0],                                /* commandBuffer */
+      VK_PIPELINE_STAGE_TRANSFER_BIT,           /* srcStageMask */
+      VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,       /* dstStageMask */
+      0,                                        /* dependencyFlags */
+      0,                                        /* memoryBarrierCount */
+      NULL,                                     /* pMemoryBarriers */
+      2,                                        /* bufferMemoryBarrierCount */
+      mb,                                       /* bufferMemoryBarriers */
+      0,                                        /* imageMemoryBarrierCount */
+      NULL                                      /* pImageMemoryBarriers */
+  );
+
+  printf("ending command buffer\n");
   vkEndCommandBuffer(r->vkb[0]);
 
   VkSubmitInfo si = {
@@ -931,12 +1030,15 @@ int init_gpu_data(struct vulkanrt *r, const struct network *net)
     .pSignalSemaphores = NULL
   };
 
+  printf("submitting memory copy queue\n");
   if(vkQueueSubmit(r->graphicsq, 1, &si, VK_NULL_HANDLE) != VK_SUCCESS) {
     fprintf(stderr, "failed to enqueue initial copy buffer job\n");
     return 1;
   }
 
+  printf("waiting for memory copy queue completion\n");
   vkDeviceWaitIdle(r->vkd);
+  printf("done\n");
 
   return 0;
 }
@@ -1160,7 +1262,7 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
   };
 
   VkPipelineColorBlendAttachmentState cbas = {
-    .blendEnable = VK_FALSE,
+    .blendEnable = VK_TRUE,
     .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
     .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
     .colorBlendOp = VK_BLEND_OP_ADD,
@@ -1186,10 +1288,17 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
 
   /* create the pipeline */
 
-  VkPushConstantRange pcr = {
-    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-    .offset = 0,
-    .size = MAT4_SIZE
+  VkPushConstantRange pcr[] = {
+    {
+      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+      .offset = 0,
+      .size = MAT4_SIZE + sizeof(float)
+    },
+    {
+      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+      .offset = MAT4_SIZE+sizeof(float)*4,
+      .size = VEC4_SIZE
+    }
   };
 
   VkPipelineLayoutCreateInfo plci = {
@@ -1198,8 +1307,8 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
     .flags = 0,
     .setLayoutCount = 0,
     .pSetLayouts = NULL,
-    .pushConstantRangeCount = 1,
-    .pPushConstantRanges = &pcr
+    .pushConstantRangeCount = 2,
+    .pPushConstantRanges = pcr
   };
   int res = vkCreatePipelineLayout(r->vkd, &plci, NULL, layout);
   if(res != VK_SUCCESS) {
@@ -1601,7 +1710,8 @@ int create_fences(struct vulkanrt *r)
   return 0;
 }
 
-int record_command_buffers(struct vulkanrt *r, const struct network *net, uint32_t i)
+int record_command_buffers(struct vulkanrt *r, const struct network *net, 
+    uint32_t i)
 {
   VkCommandBufferBeginInfo bi = {
     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1625,33 +1735,64 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net, uint32
     .pClearValues = &r->clear
   };
   vkCmdBeginRenderPass(r->vkb[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+  
+  VkDeviceSize offset = 0;
+
+#if 1
+  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
+      r->node_pipeline);
+  //XXX hardcode node color
+  r->constants.color[0] = 0.7f;
+  r->constants.color[1] = 0.7f;
+  r->constants.color[2] = 0.7f;
+  r->constants.color[3] = 1.0f;
+  r->constants.z = 0;
 
   vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
-      VK_SHADER_STAGE_VERTEX_BIT, 0, MAT4_SIZE, &r->world.m[0]);
+      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Constants), &r->constants);
 
   /* node rendering */
-  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->node_pipeline);
-  VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
   vkCmdDraw(r->vkb[i],
       net->n,    /* vertex count */
-      net->n,    /* instance count */
+      1,         /* instance count */
       0,         /* first vertex */
       0          /* first instance */
-      );
+  );
+#endif
+  //XXX hardcode link color
+  r->constants.color[0] = 0.0f;
+  r->constants.color[1] = 0.7f;
+  r->constants.color[2] = 0.7f;
+  r->constants.color[3] = 0.01f;
+  r->constants.z = -10;
 
-  /* link rendering */
 #if 0
-  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, r->link_pipeline);
+  /* link rendering */
+  offset = 0;
+  vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.tlink_buffer, &offset);
+  vkCmdDraw(r->vkb[i],
+      net->t,
+      1,
+      0,
+      0
+  );
+#else
+  printf("BONK\n");
+  vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
+      r->link_pipeline);
+  vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
+      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Constants), &r->constants);
   vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
   vkCmdDrawIndexed(r->vkb[i], 
       net->l*2,  /* vertex count (nodes) (2 per line) */
-      net->l,    /* instance count (lines) */
+      1,         /* instance count */
       0,         /* first index */
       0,         /* vertex offset */
       0          /* first instance */
       );
 #endif
+
 
 
   vkCmdEndRenderPass(r->vkb[i]);
@@ -1668,8 +1809,6 @@ void draw(struct vulkanrt *r)
 {
   static int rix = -1; //resource index
   rix = (rix+1) % r->nimg;
-  printf("resource %d\n", rix);
-
   VkResult res;
 
   /*
@@ -1688,7 +1827,8 @@ void draw(struct vulkanrt *r)
 
   uint32_t img_idx;
   VkResult result = vkAcquireNextImageKHR(
-      r->vkd, r->swapchain, UINT64_MAX, r->image_ready[rix], VK_NULL_HANDLE, &img_idx);
+      r->vkd, r->swapchain, UINT64_MAX, r->image_ready[rix], VK_NULL_HANDLE, 
+      &img_idx);
 
   /* determine what to do */
   switch(result) {
@@ -1702,7 +1842,6 @@ void draw(struct vulkanrt *r)
       fprintf(stderr, "major shitmuffin\n");
       return;
   }
-  printf("image %u \n", img_idx);
   record_command_buffers(r, __net, img_idx);
 
   /* time to submit command buffer to graphics/present queue */
@@ -1940,7 +2079,6 @@ void glfw_mouse_move_callback(GLFWwindow *w, double x, double y) {
 
     update_world(__r);
     draw(__r);
-    printf("x,y: (%f, %f) dx,dy: (%f,%f) ddx,ddy: (%f,%f)\n", x, y, dx, dy, d.x, d.y);
   }
 
   mx = x;

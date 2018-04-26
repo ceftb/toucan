@@ -142,6 +142,36 @@ float distance(Point2 a, Point2 b)
   return sqrt(dx*dx + dy*dy);
 }
 
+float slope(Point2 a, Point2 b)
+{
+  float dx = a.x - b.x,
+        dy = a.y - b.y;
+
+  if(dx == 0)
+    return 0;
+
+  return dy/dx;
+}
+
+Point2 direction(Point2 a, Point2 b)
+{
+  Point2 p = {
+    .x = b.x - a.x,
+    .y = b.y - a.y
+  };
+  return p;
+}
+
+Point2 unit(Point2 a)
+{
+  float norm = sqrt(a.x*a.x + a.y*a.y);
+  Point2 p = {
+    .x = a.x / norm,
+    .y = a.y / norm
+  };
+  return p;
+}
+
 float angle(Point2 a, Point2 b)
 {
   float dx = b.x - a.x,

@@ -17,8 +17,10 @@ struct network barbell()
   struct network net = {
     .n = 6,
     .l = 5,
+    .t = 0,
     .nodes = malloc(net.n*sizeof(struct point2)),
-    .links = malloc(net.l*2*sizeof(uint32_t))
+    .links = malloc(net.l*2*sizeof(uint32_t)),
+    .tlinks = NULL
   };
 
   struct point2 nodes[] = {
@@ -48,8 +50,10 @@ struct network barbell_nolayout()
   struct network net = {
     .n = 6,
     .l = 5,
+    .t = 0,
     .nodes = malloc(net.n*sizeof(struct point2)),
-    .links = malloc(net.l*2*sizeof(uint32_t))
+    .links = malloc(net.l*2*sizeof(uint32_t)),
+    .tlinks = NULL
   };
 
   struct point2 nodes[] = {
@@ -79,8 +83,10 @@ struct network dcomp()
   struct network net = {
     .n = 1594,
     .l = 6019,
+    .t = 0,
     .nodes = malloc(net.n*sizeof(struct point2)),
-    .links = malloc(net.l*2*sizeof(uint32_t))
+    .links = malloc(net.l*2*sizeof(uint32_t)),
+    .tlinks = NULL
   };
 
   memset(net.nodes, 0, net.n*sizeof(struct point2));
