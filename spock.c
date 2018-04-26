@@ -514,10 +514,13 @@ int create_device(struct vulkanrt *r) {
 
 int init_vulkan(struct vulkanrt *r)
 {
-  //r->vk = dlopen("libvulkan.so.1", RTLD_NOW);
-  r->vk = dlopen("/usr/lib64/amdvlk64.so", RTLD_NOW);
+  // try to get hardware vendors library first
+  r->vk = dlopen("amdvlk64.so", RTLD_NOW);
+  if(!r->vk) {
+    // fallback to system vendors library
+    r->vk = dlopen("libvulkan.so.1", RTLD_NOW);
+  }
   if(!r->vk){
-
     fprintf(stderr, "failed to load vulkan\n");
     return 1;
   }
