@@ -847,7 +847,7 @@ int choose_memory(struct vulkanrt *r)
     }
 
     /* choose local device memory (must be exclusively local) */
-    if(t->propertyFlags == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
+    if(t->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
       local_mem_index = i;
     }
   }
@@ -1293,15 +1293,17 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
 
   VkPushConstantRange pcr[] = {
     {
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
       .offset = 0,
-      .size = MAT4_SIZE + sizeof(float)
-    },
+      .size = sizeof(Constants)
+    }
+    /*
     {
       .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
       .offset = MAT4_SIZE+sizeof(float)*4,
       .size = VEC4_SIZE
     }
+    */
   };
 
   VkPipelineLayoutCreateInfo plci = {
@@ -1310,7 +1312,7 @@ int init_graphics_pipeline(struct vulkanrt *r, VkPrimitiveTopology pt,
     .flags = 0,
     .setLayoutCount = 0,
     .pSetLayouts = NULL,
-    .pushConstantRangeCount = 2,
+    .pushConstantRangeCount = 1,
     .pPushConstantRanges = pcr
   };
   int res = vkCreatePipelineLayout(r->vkd, &plci, NULL, layout);
@@ -1752,7 +1754,8 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net,
   r->constants.z = 0;
 
   vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
-      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Constants), &r->constants);
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+      0, sizeof(Constants), &r->constants);
 
   /* node rendering */
   vkCmdBindVertexBuffers(r->vkb[i], 0, 1, &r->bufs.node_buffer, &offset);
@@ -1784,8 +1787,12 @@ int record_command_buffers(struct vulkanrt *r, const struct network *net,
   printf("BONK\n");
   vkCmdBindPipeline(r->vkb[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
       r->link_pipeline);
-  vkCmdPushConstants(r->vkb[i], r->node_pipeline_layout, 
-      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Constants), &r->constants);
+  //vkCmdPushConstants(r->vkb[i], r->link_pipeline_layout, 
+  //    VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Constants), &r->constants);
+  vkCmdPushConstants(r->vkb[i], r->link_pipeline_layout, 
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+      0, sizeof(Constants), &r->constants);
+
   vkCmdBindIndexBuffer(r->vkb[i], r->bufs.link_buffer, 0, VK_INDEX_TYPE_UINT32);
   vkCmdDrawIndexed(r->vkb[i], 
       net->l*2,  /* vertex count (nodes) (2 per line) */
