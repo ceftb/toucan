@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <sys/time.h>
 #include "toucan.h"
 #include "spock.h"
 #include "nets.h"
@@ -13,16 +14,29 @@ int main(void)
   Network net = dcomp();
   //Network net = barbell();
 
+  struct timeval start, finish;
+  gettimeofday(&start, NULL);
+  printf("building tree\n");
   Ptree *ptr = ptree(&net, 1);
-  for(int i=0; i<100; i++) {
+  printf("DONE\n");
+  for(int i=0; i<50; i++) {
     layout(&net, ptr);
-    if(i%1 == 0) {
-      ptr = ptree(&net, 0);
-    }
+    //if(i%1 == 0) {
+      //ptr = ptree(&net, 0);
+      balance(ptr);
+    //}
   }
+  gettimeofday(&finish, NULL);
+  size_t d = 
+    (finish.tv_sec*1e6 + finish.tv_usec) - 
+    (start.tv_sec*1e6 + start.tv_usec);
+  printf("time: %f\n", d/1e3);
+
+  //return 0;
 
   tesselate_links(&net);
-  printf("tesselation size %u (%d MB)\n", net.t, (int)ceil((net.t * sizeof(Point2))/1e6));
+  printf("tesselation size %u (%d MB)\n", 
+      net.t, (int)ceil((net.t * sizeof(Point2))/1e6));
 
   struct vulkanrt r = new_vulkanrt();
   if(init_vulkan(&r))

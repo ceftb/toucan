@@ -43,10 +43,17 @@ typedef struct extent {
         height;
 } Extent;
 
+typedef struct bounds {
+  float left, right, top, bottom;
+} Bounds;
+
+struct pinode;
+
 /* Ptree base node */
 typedef struct pnode {
   PnType type;
   float  mass;
+  struct pinode *parent; 
 } Pnode ;
 
 /* Ptree interior node */
@@ -55,6 +62,7 @@ typedef struct pinode {
   Pnode   *quad[4];
   Point2  centroid;
   float   diameter;
+  Bounds  bounds;
 } Pinode;
 
 /* Ptree leaf node */
@@ -81,11 +89,13 @@ Plnode* new_plnode();
 void init_lnode(Plnode *);
 
 Ptree* ptree(Network*, int init);
+Ptree* balance(Ptree*);
 void layout(Network*, Ptree*);
 
+float diameter(Pinode*);
 void force(Ptree*);
 void qforce(Pinode*, Plnode*);
-void fab(Pnode*, Plnode*);
+void fab(Pnode*, Plnode*, float);
 void gab(Plnode*, Plnode*);
 float distance(Point2, Point2);
 float slope(Point2, Point2);
@@ -96,6 +106,7 @@ void step(Ptree*);
 void constrain(Network*, Ptree*);
 void insert(Pinode*, Plnode*);
 Extent extent(Network*, float, float);
+Extent lextent(Plnode *nodes, uint32_t len, float cx, float cy);
 unsigned short ptselect(Pinode*, Plnode*);
 Pinode* new_quad(Pinode*, unsigned short);
 

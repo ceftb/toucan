@@ -9,7 +9,7 @@ find_package(glfw3 3.2 REQUIRED)
 find_package(Vulkan REQUIRED)
 
 set(CMAKE_CXX_FLAGS "-fdiagnostics-color=always -Wall -Wextra")
-set(CMAKE_C_FLAGS "-g -fdiagnostics-color=always -Wall -Wextra")
+set(CMAKE_C_FLAGS "-g -fopenmp -fdiagnostics-color=always -Wall -Wextra")
 
 # vulkan settings ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
